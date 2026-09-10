@@ -1,0 +1,10 @@
+# Workspace router repo: only the Claude/Lodestar setup is tracked.
+/*
+!/.gitignore
+!/CLAUDE.md
+!/.claude/
+!/.lodestar/
+
+# Python bytecode from the hooks
+__pycache__/
+*.pyc

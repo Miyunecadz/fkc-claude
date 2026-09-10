@@ -1,0 +1,218 @@
+{
+  "version": "0.4.0",
+  "placement": "personal",
+  "repos": [
+    {
+      "name": "fk-admin-panel-be",
+      "path": "./fk-admin-panel-be",
+      "stacks": [
+        "node-dbmate",
+        "graphql-apollo-server",
+        "redis-queue",
+        "has-auth"
+      ],
+      "architecture": "graphify",
+      "docs": "docs/fk-admin-panel-be/",
+      "mapping": {
+        "lastMappedSha": "f5f0ba1fb118b51b99d3322fcddaf3ab07fbaf98",
+        "lastMappedAt": "2026-09-10T13:10:00Z",
+        "build": "full",
+        "extractFlags": [
+          "--force",
+          "--code-only"
+        ],
+        "graph": {
+          "nodes": 2022,
+          "edges": 2932,
+          "communities": 359,
+          "communityLabels": "placeholders (no LLM backend configured)"
+        },
+        "coverage": {
+          "filesTotal": 380,
+          "filesCovered": 380,
+          "filesMissing": 0,
+          "filesSkipped": 21166,
+          "filesStale": 0,
+          "mode": "graphify"
+        },
+        "notIndexed": {
+          "count": 16,
+          "reason": "--code-only: 10 docs, 1 paper, 5 images skipped; no LLM API key for semantic extraction"
+        },
+        "lastMappedBy": "graph.sh ensure"
+      }
+    },
+    {
+      "name": "fk-admin-panel-fe",
+      "path": "./fk-admin-panel-fe",
+      "stacks": [
+        "react-craco",
+        "graphql-apollo-client",
+        "has-frontend",
+        "has-eslint",
+        "has-prettier",
+        "has-husky"
+      ],
+      "architecture": "graphify",
+      "docs": "docs/fk-admin-panel-fe/",
+      "mapping": {
+        "lastMappedSha": "fab39f20d32580187d2257cdf0e7c7000a63ec0c",
+        "lastMappedAt": "2026-09-10T13:10:05Z",
+        "build": "full",
+        "extractFlags": [
+          "--force",
+          "--code-only"
+        ],
+        "graph": {
+          "nodes": 2508,
+          "edges": 2603,
+          "communities": 426,
+          "communityLabels": "placeholders (no LLM backend configured)"
+        },
+        "coverage": {
+          "filesTotal": 442,
+          "filesCovered": 440,
+          "filesMissing": 2,
+          "filesSkipped": 52572,
+          "filesStale": 0,
+          "mode": "graphify",
+          "missingFiles": [
+            ".husky/_/husky.sh",
+            "test-results/.last-run.json"
+          ],
+          "note": "Coverage script reported 5 missing / 3 stale, but 3 of those (.eslintrc.js, .prettierrc.js, .husky/pre-commit) ARE in the graph under source_file; the script compares node 'id', which strips leading dots. Verified against source_file: 440/442. The 2 genuinely absent files are a husky-generated bootstrap and a Playwright run artifact - neither is project source."
+        },
+        "notIndexed": {
+          "count": 11,
+          "reason": "--code-only: 4 docs, 7 images skipped; no LLM API key for semantic extraction"
+        },
+        "lastMappedBy": "graph.sh ensure"
+      }
+    },
+    {
+      "name": "fk-mobile",
+      "path": "./fk-mobile",
+      "stacks": [
+        "react-native",
+        "graphql-apollo-client",
+        "has-frontend",
+        "has-eslint",
+        "has-prettier",
+        "has-husky"
+      ],
+      "architecture": "graphify",
+      "docs": "docs/fk-mobile/",
+      "mapping": {
+        "lastMappedSha": "415eb1c5bd6180800e95d423c27af69cec37e0c3",
+        "lastMappedAt": "2026-09-10T13:10:07Z",
+        "build": "full",
+        "extractFlags": [
+          "--force",
+          "--code-only"
+        ],
+        "graph": {
+          "nodes": 830,
+          "edges": 748,
+          "communities": 212,
+          "communityLabels": "placeholders (no LLM backend configured)"
+        },
+        "coverage": {
+          "filesTotal": 212,
+          "filesCovered": 207,
+          "filesMissing": 5,
+          "filesSkipped": 24,
+          "filesStale": 0,
+          "mode": "graphify",
+          "missingFiles": [
+            "android/app/google-services.json",
+            "android/link-assets-manifest.json",
+            "ios/FkMobile/Images.xcassets/AppIcon.appiconset/Contents.json",
+            "ios/FkMobile/Images.xcassets/Contents.json",
+            "ios/link-assets-manifest.json"
+          ],
+          "note": "Coverage script reported 8 missing / 3 stale; 3 of those (.eslintrc.js, .prettierrc.js, .husky/pre-commit) ARE in the graph under source_file - the script compares node 'id', which strips leading dots (same artifact seen in fk-admin-panel-fe). Verified against source_file: 207/212. The 5 genuinely absent files are native config and asset manifests, not project source."
+        },
+        "notIndexed": {
+          "count": 29,
+          "reason": "--code-only: 3 docs, 26 images skipped; no LLM API key for semantic extraction"
+        },
+        "lastMappedBy": "graph.sh ensure"
+      }
+    }
+  ],
+  "skills": [
+    "architecture-overview",
+    "backend-standards",
+    "frontend-standards",
+    "graphql-contract",
+    "mobile-standards",
+    "planning-workflow",
+    "pull-request"
+  ],
+  "guardrails": [
+    "block-commit-to-default-branch",
+    "block-destructive-commands",
+    "block-env-files",
+    "block-secret-files",
+    "design-guidance-on-ui-edits",
+    "no-hand-edit-lockfiles",
+    "protect-dbmate-schema",
+    "protect-default-branch",
+    "push-behind-pr-gate",
+    "verifier-before-commit"
+  ],
+  "agents": [
+    "change-reviewer",
+    "pr-author",
+    "ticket-analyst",
+    "ticket-creator",
+    "ticket-implementer",
+    "ticket-validator"
+  ],
+  "guardrailSurfaces": {
+    "permission": {
+      "rules": [
+        "block-env-files",
+        "block-secret-files"
+      ],
+      "entries": [
+        "Read(./.env)",
+        "Read(./**/.env)",
+        "Read(./.env.local)",
+        "Read(./**/.env.local)",
+        "Read(./.env.development)",
+        "Read(./**/.env.development)",
+        "Read(./.env.production)",
+        "Read(./**/.env.production)",
+        "Read(./**/*.pem)",
+        "Read(./**/*.key)",
+        "Read(./**/*.p12)",
+        "Read(./**/*.pfx)",
+        "Read(./**/id_rsa)",
+        "Read(./**/id_ed25519)",
+        "Read(./**/id_ecdsa)",
+        "Read(./**/id_dsa)",
+        "Read(./**/credentials.json)",
+        "Read(./*.pem)",
+        "Read(./*.key)",
+        "Read(./*.p12)",
+        "Read(./*.pfx)",
+        "Read(./id_rsa)",
+        "Read(./id_ed25519)",
+        "Read(./id_ecdsa)",
+        "Read(./id_dsa)",
+        "Read(./credentials.json)"
+      ],
+      "appliedAt": "2026-09-09T15:51:35Z"
+    },
+    "commit": {
+      "installed": false,
+      "reason": "User declined; husky edits touched tracked files and were reverted. Repos left at pre-run state.",
+      "rulesHoldingAgentOnly": [
+        "block-commit-to-default-branch",
+        "block-env-files",
+        "block-secret-files"
+      ]
+    }
+  }
+}
