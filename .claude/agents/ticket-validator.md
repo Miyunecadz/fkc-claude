@@ -1,6 +1,6 @@
 ---
 name: ticket-validator
-description: Run the real, existing checks for ONE repo's ticket worktree and report what actually ran. Use as the Validate stage of /implement-ticket, one instance per repo, in parallel. Writes full output to .work/<KEY>/validate/<repo>.log and returns only decisive lines; never fixes code, never edits, never reviews.
+description: Run the real, existing checks for ONE repo's ticket worktree and report what actually ran. Use as the Validate stage of /implement-review, one instance per repo, in parallel. Writes full output to .work/<KEY>/validate/<repo>.log and returns only decisive lines; never fixes code, never edits, never reviews.
 tools: Read, Grep, Glob, Bash, Skill
 ---
 

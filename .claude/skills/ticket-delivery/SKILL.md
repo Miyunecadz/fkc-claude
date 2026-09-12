@@ -7,7 +7,9 @@ stacks: [all]
 # Ticket delivery
 
 Take a ticket that already exists in Jira and carry it to a reviewed, validated change on
-a branch in an **isolated worktree per repo**. Entry point: `/implement-ticket <KEY>`.
+a branch in an **isolated worktree per repo**. Two entry points, with a human pause between
+them: `/implement-ticket <KEY>` writes the code and stops at `IMPLEMENTED`;
+`/implement-review <KEY>` validates, reviews and commits it once a human has read it.
 
 Not this skill: writing or refining tickets (`ticket-writing`, `/create-ticket`), pushing,
 opening the PR (`pull-request`, `/create-pr`), or deploying. It ends at a reviewed,
@@ -21,6 +23,10 @@ of them:
    branch, both describe code that is no longer what will be merged into.
 3. **The main context may not hold the codebase.** Reading is delegated; conclusions come
    back, file bodies do not.
+4. **The work may not be on this machine.** `.work/<KEY>/` is local and is never committed,
+   so a ticket another dev implemented is invisible here. Jira is the only record that
+   travels — which is why `/create-pr` writes a delivery comment and both other commands
+   check for one before starting.
 
 ## 1. The ticket workspace
 
@@ -90,37 +96,63 @@ Rules:
   is not in it is lost, and a resumed run has no way to know it ever existed.
 - Store decisions and evidence — `path:line`, a sha, one decisive output line — not prose,
   not the ticket text, not diffs. The reviewer reads the ticket and the diff itself.
-- Re-running `/implement-ticket` resumes at the stage after `state:`. Check the sidecar
+- Re-running either command resumes from `state:`, and each refuses the states that belong
+  to the other. Check the sidecar
   before writing anything; nothing here is safe to duplicate.
 
 ## 2. Stages and gates
 
 Strictly ordered — each stage consumes the previous one's output.
 
-| Stage | Who does it | Produces | State after | Gate before moving on |
-|---|---|---|---|---|
-| Locate | main thread | the Jira issue read once, fingerprint recorded, repos in scope | `NEW` | issue exists, is not already Done/Closed, and names its affected systems |
-| Prepare | `ticket-worktree.sh` + `ticket-freshness.sh graph` | a worktree per repo, cut from the **fetched** base; a graph built from that worktree | — | every repo in scope has a worktree and a graph whose `GRAPH_SHA` is its HEAD |
-| Analyse | `ticket-analyst`, one per repo, **parallel** | requirement interpretation, affected files as `path:line`, unknowns, risks | `ANALYSED` | no material unknown; nothing the ticket needs is missing from the base |
-| Plan | main thread | files to touch per repo, pattern to follow, cross-repo order, the contract if one changes, validation commands, out of scope | `PLANNED` | — |
-| **Approval** | the user | the decision, recorded verbatim | `APPROVED` | **the user approves.** Nothing under any worktree is edited before this. A presented plan is not an approved one |
-| Implement | `ticket-implementer`, one per repo | the change, scoped to the plan | `IMPLEMENTING` → `IMPLEMENTED` | plan followed, or the deviation recorded in `## Implement` |
-| Validate | `ticket-validator`, one per repo, **parallel** | prepared checks vs observed results, decisive lines only | `VERIFIED`, else `FAILED_VERIFICATION` | every applicable check ran and passed — a check that did not run is never recorded as passing |
-| Review | `change-reviewer`, mode `gate`, **one, sequential** | independent verdict | `REVIEWED` | no blocking finding stands |
-| Handover | main thread | commit per repo, report | `HANDED_OVER` | — |
+The pipeline is split across **two commands**, with a human pause between them:
+
+```
+/implement-ticket   Locate → Prepare → Analyse → Plan → [approve] → Implement    ends IMPLEMENTED
+      ── the dev reads the diff, and normally tweaks it by hand ──
+/implement-review   Validate → Review → Handover (commit)                        ends HANDED_OVER
+/create-pr          push → PR → the ticket's delivery comment                    ends PR_OPEN
+```
+
+| Stage | Command | Who does it | Produces | State after | Gate before moving on |
+|---|---|---|---|---|---|
+| Locate | implement | main thread | the Jira issue read once, fingerprint recorded, repos in scope | `NEW` | issue exists, carries no delivery comment, has not moved past implementation, and names its affected systems |
+| Prepare | implement | `ticket-worktree.sh` + `ticket-freshness.sh graph` | a worktree per repo, cut from the **fetched** base; a graph built from that worktree | — | every repo in scope has a worktree and a graph whose `GRAPH_SHA` is its HEAD |
+| Analyse | implement | `ticket-analyst`, one per repo, **parallel** | requirement interpretation, affected files as `path:line`, unknowns, risks | `ANALYSED` | no material unknown; nothing the ticket needs is missing from the base |
+| Plan | implement | main thread | files to touch per repo, pattern to follow, cross-repo order, the contract if one changes, validation commands, out of scope | `PLANNED` | — |
+| **Approval** | implement | the user | the decision, recorded verbatim | `APPROVED` | **the user approves.** Nothing under any worktree is edited before this. A presented plan is not an approved one |
+| Implement | implement | `ticket-implementer`, one per repo | the change, scoped to the plan | `IMPLEMENTING` → `IMPLEMENTED` | plan followed, or the deviation recorded in `## Implement` |
+| **Human read** | — | the dev | whatever they change by hand | `IMPLEMENTED` | **the command ends here.** Nothing is validated, reviewed or committed until a human has read the code |
+| Validate | review | `ticket-validator`, one per repo, **parallel** | prepared checks vs observed results, decisive lines only | `VERIFIED`, else `FAILED_VERIFICATION` | every applicable check ran and passed — a check that did not run is never recorded as passing |
+| Review | review | `change-reviewer`, mode `gate`, **one, sequential** | independent verdict, AC by AC | `REVIEWED` | no blocking finding stands, and no AC row is `[FAIL]` |
+| Handover | review | main thread | commit per repo, report | `HANDED_OVER` | — |
 
 Terminal endings without implementation are legitimate, not failures: `NOT_NEEDED`,
 `ALREADY_IMPLEMENTED`, `NOT_APPROVED`, `BLOCKED`.
 
-**Review is capped at two rounds.** A blocking finding sends the affected repo — only that
-repo — back through implement → validate → review, appended as `(2)`. `## Review (2)` is
-the last round. Anything still standing after it is recorded, `blocked:` is set, and it
-goes to the user: a third round costs another 1.2–2.5M tokens and a reviewer twice wrong
-about the same code will not be right on the third pass.
+**`IMPLEMENTED` is the pause, and no state was added for it.** The command ending is what
+makes it durable: a blocking prompt dies when the dev goes home, and the dev who comes back
+may be a different person on a different day.
 
-**Freshness is re-checked at four points**, not once: before presenting the Plan, before
-Implement, before Review, and at Handover. Both halves — the Jira issue and the base
-branch. [`FRESHNESS.md`](./FRESHNESS.md) owns how, and what each verdict forces.
+**The reviewer reports; it never fixes.** `/implement-review` has no `ticket-implementer` —
+a command that both checks the code and can rewrite it would put the dev's hand-edits at
+risk and would review a version they never saw. A blocking finding leaves two routes: the
+dev fixes it by hand and re-runs `/implement-review`, or re-runs `/implement-ticket`, which
+owns the implementer and the cap.
+
+**The fix round is capped at two.** A finding sends only the repo it names back through
+implement → validate → review, appended as `(2)`. There is no round three: it is recorded,
+`blocked:` is set, and it goes to the user — a reviewer twice wrong about the same code will
+not be right on the third pass, and a round costs 1.2–2.5M tokens.
+
+**Judge against the ticket's acceptance criteria, not the plan.** Once a human has edited the
+code — or a second dev has reimplemented it their own way — the plan no longer describes what
+is there. The AC is the only yardstick that survives that, which is why the reviewer returns
+one PASS/FAIL row per criterion.
+
+**Freshness is re-checked at five points**, not once: before presenting the Plan, before
+Implement, at the start of `/implement-review`, before Review, and before the commit. Both
+halves — the Jira issue and the base branch. [`FRESHNESS.md`](./FRESHNESS.md) owns how, and
+what each verdict forces.
 
 ## 3. What runs in parallel, and what never does
 
@@ -257,13 +289,19 @@ written and nothing more. `VERIFIED` means the applicable checks ran and passed,
 output recorded. `REVIEWED` means the reviewer returned PASS, or its blocking findings are
 fixed and re-validated. "Done" is never `IMPLEMENTED`.
 
-At Handover, per repo: re-check freshness, then **commit inside the worktree** — one commit,
-conventional one-line subject, no body. Do not push, do not open a PR, do not transition the
-Jira issue: those are the user's call. Report the branch and the exact command they would
-run to push it.
+Handover belongs to `/implement-review`, after the reviewer returns PASS. Per repo: re-check
+freshness, then **commit inside the worktree** — one commit, conventional one-line subject,
+no body. Nothing to commit, because the dev already committed their own tweaks, is a normal
+outcome: say so and do not amend their commit. Do not push, do not open a PR, do not
+transition the Jira issue: those are the user's call. Report the branch and the exact command
+they would run to push it.
+
+Say the push line whenever the work may outlive the day. `.work/<KEY>/` never leaves this
+machine, so an unpushed branch plus an absent dev is how one ticket gets implemented twice.
 
 The branch leaves the machine through `/create-pr` (the `pull-request` skill) and its own
-approval gate — never from here. It sets `state: PR_OPEN` when the PR is open.
+approval gate — never from here. It sets `state: PR_OPEN` when the PR is open, and writes the
+ticket's delivery comment, which is what makes the work visible to anyone else.
 
 Last sidecar section, and the reply to the user:
 
