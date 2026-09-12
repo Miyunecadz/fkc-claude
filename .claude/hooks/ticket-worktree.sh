@@ -10,6 +10,7 @@
 # ticket-worktree.sh prepare <KEY> <repo> <base-ref> [<branch>] create / reuse
 # ticket-worktree.sh status <KEY> [repo] state of each worktree
 # ticket-worktree.sh list every ticket workspace
+# ticket-worktree.sh clean <KEY> [repo] drop build output, keep the code
 # ticket-worktree.sh remove <KEY> [repo] [--force] tear down
 # ticket-worktree.sh sidecar init <KEY> <summary> write the header, state NEW
 # ticket-worktree.sh sidecar append <KEY> <Section> <STATE> body on stdin
@@ -175,6 +176,47 @@ cmd_list() {
 }
 
 # ---- remove -----------------------------------------------------------------------
+# ---- clean ----------------------------------------------------------------------
+# Build output is generated *inside* the worktree by the real checks — fk-admin-panel-fe's
+# `yarn build` leaves ~47M of craco output — and nothing ever removed it. It is not the
+# ticket's work, it is never committed, and it is by far the largest thing a ticket
+# workspace holds. Cleaning it is safe at any point after the check has been read: the
+# check's result is recorded in the sidecar, not in the directory.
+ARTIFACT_DIRS="build dist .next coverage"
+
+cmd_clean() {
+ local key="${1:-}" repo=""
+ shift || true
+ for a in "$@"; do repo="$a"; done
+ [ -n "$key" ] || die "usage: clean <KEY> [repo]"
+ [ -d "$WORK/$key" ] || die "no workspace at .work/$key"
+ local targets="$REPOS"; [ -n "$repo" ] && targets="$repo"
+ for r in $targets; do
+  local wt="$WORK/$key/$r"; [ -d "$wt" ] || continue
+  local freed=0 removed=""
+  for a in $ARTIFACT_DIRS; do
+   local path="$wt/$a"
+   [ -d "$path" ] || continue
+   # Never delete something git tracks. A directory called `build` that is committed in
+   # this repo is source, whatever it is named — and losing it would be losing work.
+   if git -C "$wt" ls-files --error-unmatch -- "$a" >/dev/null 2>&1; then
+    echo "- $r/$a: kept — tracked by git"
+    continue
+   fi
+   local size; size=$(du -sm "$path" 2>/dev/null | cut -f1)
+   if rm -rf "$path"; then
+    removed="$removed $a"
+    freed=$((freed + ${size:-0}))
+   fi
+  done
+  if [ -n "$removed" ]; then
+   echo "- $r: removed$removed (~${freed}M reclaimed)"
+  else
+   echo "- $r: nothing to clean"
+  fi
+ done
+}
+
 cmd_remove() {
  local key="${1:-}" repo="" force=0
  shift || true
@@ -195,7 +237,7 @@ cmd_remove() {
  && echo "- $r: worktree removed (branch kept)" \
  || echo "- $r: worktree remove failed"
  done
- echo "note: .work/$key/work.md and the branches are kept — delete them yourself when the ticket is closed."
+ echo "note: .work/$key/work.md, the validate/review logs and the branches are kept — delete them yourself when the ticket is closed."
 }
 
 # ---- sidecar ----------------------------------------------------------------------
@@ -349,7 +391,8 @@ case "${1:-}" in
  prepare) shift; cmd_prepare "$@" ;;
  status) shift; cmd_status "$@" ;;
  list) shift; cmd_list "$@" ;;
+ clean) shift; cmd_clean "$@" ;;
  remove) shift; cmd_remove "$@" ;;
  sidecar) shift; cmd_sidecar "$@" ;;
- *) die "usage: ticket-worktree.sh {prepare|status|list|remove|sidecar} ..." ;;
+ *) die "usage: ticket-worktree.sh {prepare|status|list|clean|remove|sidecar} ..." ;;
 esac

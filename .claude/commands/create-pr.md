@@ -25,7 +25,7 @@ approval gate, which is correct — everything else is overhead worth removing.
 
 | Budget | Why |
 |---|---|
-| **12 `Bash` calls** for the whole run | the preflight, the freshness check, the formatter, the commit and the push. Reading the diff is `pr-author`'s job |
+| **14 `Bash` calls** for the whole run | the preflight, the freshness check, the formatter, the commit, the push, and the two of §7b. Reading the diff is `pr-author`'s job |
 | **5 Bitbucket calls** — 2 before the post, the post, 2 after | the fixed list in `pull-request` → `BITBUCKET.md`. Past runs spent 13–15, surveying PRs unrelated to this branch |
 | **0 reviewers spawned** | this command never runs `change-reviewer` — see §3 |
 | **0 agents left running** | see §7 |
@@ -211,6 +211,23 @@ has. Append `## PR` to the sidecar and set `state: PR_OPEN` — through the hook
 - jira: delivery comment posted, fingerprint refreshed
 EOF
 ```
+
+## 7b. Offer to reap the worktree
+
+The branch is pushed and the PR holds the work, so the worktree is no longer the only copy
+of anything — and a ticket workspace nobody reaps outlives the ticket by months. Show its
+size and offer teardown, in the same message as the report:
+
+```bash
+du -sh .work/<KEY>/*                                  # what it is costing
+.claude/hooks/ticket-worktree.sh remove <KEY>         # only after the user says yes
+```
+
+**Offer, never run it unasked** — deleting a checkout is the user's call, so this is a
+question in the report, not a step in the pipeline. Declining is a normal outcome; `list`
+keeps showing it, so it can be reaped later. If `remove` refuses (dirty, or unpushed
+commits), relay the refusal — never reach for `--force`. `WORKTREE.md` §1 owns the rest,
+including `clean <KEY>` for the user who wants the disk back but not the checkout.
 
 ## 8. No agent outruns the report
 

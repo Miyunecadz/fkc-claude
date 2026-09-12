@@ -23,6 +23,21 @@ Preconditions to confirm before promising a check:
   about the code.
 - Never run an install inside a worktree (`WORKTREE.md` §3).
 
+## After a build check — drop what it left behind
+
+`yarn build` in `fk-admin-panel-fe` writes ~47M of craco output into the worktree, and
+nothing used to remove it: it was the single largest thing a finished ticket workspace
+held, long after anyone cared about it. Once the build's result is read and recorded,
+the directory has done its job:
+
+```bash
+.claude/hooks/ticket-worktree.sh clean <KEY> [repo]
+```
+
+It deletes only untracked `build`/`dist`/`.next`/`coverage`, never anything git tracks, and
+never source. Record the build's **result** first — the log line is the evidence, and a
+cleaned directory is not a check that did not run.
+
 ## Recording
 
 Full output goes to `.work/<KEY>/validate/<repo>.log`; the sidecar and the report get the

@@ -36,12 +36,30 @@ Other subcommands:
 ```bash
 .claude/hooks/ticket-worktree.sh status <KEY> [repo]   # branch, base, ahead/behind, dirty
 .claude/hooks/ticket-worktree.sh list                  # every ticket workspace + state
+.claude/hooks/ticket-worktree.sh clean  <KEY> [repo]   # drop build output, keep the code
 .claude/hooks/ticket-worktree.sh remove <KEY> [repo] [--force]
 ```
 
 `remove` refuses while the worktree is dirty or holds unpushed commits, and never deletes
-the branch or the sidecar. Removing a ticket workspace is the user's call, not part of the
-workflow.
+the branch or the sidecar.
+
+`clean` deletes only **untracked** build output (`build`, `dist`, `.next`, `coverage`) from
+a worktree that is still in use. A directory git tracks is left alone whatever it is named,
+because a tracked `build/` is source. Run it after a build check has been read — the result
+lives in the sidecar, not in the directory.
+
+**A worktree is not kept forever.** It costs real disk: `fk-admin-panel-fe`'s `yarn build`
+alone leaves ~47M, and a ticket workspace that nobody reaps outlives the ticket by months.
+The lifecycle is:
+
+| When | What |
+|---|---|
+| a build check has been read | `clean <KEY>` — the artifact has done its job |
+| the PR is open and the branch is pushed | `/create-pr` offers `remove <KEY>`; the user decides |
+| the user declines | it stays — and `list` keeps showing it, so it can be reaped later |
+
+Teardown is still never silent: `remove` is offered, not run unasked, and it refuses
+anything dirty or unpushed, so nothing unsaved can be lost by saying yes.
 
 ## 2. Choosing the base
 
@@ -89,5 +107,15 @@ because a fresh worktree has neither and a React Native install is slow.
 
 After review passes, commit **inside the worktree** — one commit per repo, conventional
 one-line subject, no body. Do not push and do not open a PR; report the branch and the push
-command instead. The worktree stays until the user removes it: it is where the branch is
-checked out and where a reviewer can still look.
+command instead.
+
+That commit is the agent's own step, not the user's. It is allowed here and always was —
+the guardrail that used to deny it was resolving "which branch are we on?" against the
+invocation cwd (the workspace root, a repo on `main`) instead of the worktree the `git -C`
+actually names, so every ticket commit came back denied. Fixed; `block-commit-to-default-branch`
+now asks about the directory the command targets. If a commit inside a worktree is denied,
+that is a bug to report, not a gate to route around — and never with `--no-verify`.
+
+Then `clean <KEY>` to drop the build output. The worktree itself stays until the PR is
+open: it is where the branch is checked out and where a reviewer can still look. `/create-pr`
+offers to remove it once the branch is pushed — see §1.
