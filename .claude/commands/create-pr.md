@@ -56,7 +56,7 @@ gets two PRs.
 | On the issue | Then |
 |---|---|
 | a **delivery comment** with this workflow's marker | authoritative. Open the PR it names, confirm it is still open, report it, **stop** |
-| status past implementation, **no** comment | ambiguous — a hand-made PR, or a mis-moved ticket. Report both readings and ask; do not push |
+| status at or past `In Code Review`, **no** comment | ambiguous — a hand-made PR, or a mis-moved ticket. Report both readings and ask; do not push |
 | neither | proceed |
 
 The preflight's remote-branch check covers the third case, where someone pushed but never

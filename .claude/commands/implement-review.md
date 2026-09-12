@@ -60,7 +60,9 @@ No argument: relay the list, ask which ticket, stop.
 Read the Jira issue once with `mcp__jira__jira_get_issue` and re-record the freshness
 fingerprint. A **delivery comment** already on the issue means this ticket was delivered from
 another machine: report the PR it names and stop, rather than committing a second
-implementation of it.
+implementation of it. Status at or past `In Code Review` says the same thing more weakly —
+the ladder here is `To Do → In Progress → In Code Review → In Staging → Production / Release`,
+and there is no `Done` or `Closed` to look for.
 
 Then gate on `state:`:
 

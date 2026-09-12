@@ -92,8 +92,10 @@ travels:
 
 - a **delivery comment** written by this workflow (its marker, a branch, a sha, a PR link) —
   authoritative, and verifiable by opening the PR it names;
-- **status past implementation** (code review, done, closed, cancelled) — corroborating only,
-  because a human moved it and humans move tickets by mistake.
+- **status at or past `In Code Review`** — this project's ladder is
+  `To Do → In Progress → In Code Review → In Staging → Production / Release`, and only the
+  first two mean the work is still yours. Corroborating only, because a human moved it and
+  humans move tickets by mistake.
 
 Report what exists and stop. Starting a second implementation of a delivered ticket is the
 failure this check exists for. `FRESHNESS.md` §1 also has you look for a branch already
