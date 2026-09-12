@@ -263,6 +263,40 @@ def command_operands(command: str):
     return [full for _, _, full in words[1:] if full and not full.startswith("-")]
 
 
+def git_target_dirs(command: str):
+    """The directories the `git` invocations in `command` actually operate on.
+
+    `git -C <path> commit` runs in `<path>`, not in the hook's cwd. A workspace whose
+    root is itself a repo would otherwise answer every branch question about the root
+    while the command commits inside a ticket worktree on a feature branch. Returns []
+    when no git invocation names a directory - callers fall back to the invocation cwd.
+    """
+    words = shell_words(command)
+    if words is None:
+        return []
+    dirs, expect_dir, in_git = [], False, False
+    for plain, _quoted, full in words:
+        if expect_dir:
+            if full:
+                dirs.append(full)
+            expect_dir = False
+            continue
+        if plain == "git" or plain.endswith("/git"):
+            in_git = True
+            continue
+        if not in_git:
+            continue
+        if plain in ("-C", "--git-dir", "--work-tree"):
+            expect_dir = True
+        elif plain.startswith("--git-dir=") or plain.startswith("--work-tree="):
+            value = full.split("=", 1)[1]
+            if value:
+                dirs.append(value)
+        elif plain and not plain.startswith("-"):
+            in_git = False  # past git's own options, into the subcommand
+    return dirs
+
+
 class Context:
     """Per-invocation, lazily computed repo/git/shell context. Never raises."""
 
@@ -323,30 +357,41 @@ class Context:
             return True
         return self._git(["ls-files", "--error-unmatch", "--", self.abspath(path)], cwd) is not None
 
-    @property
-    def branch(self):
+    def branch(self, cwd: str = "") -> str:
         """Current branch name, or None when detached / not a repo."""
-        return self._git(["symbolic-ref", "--short", "HEAD"], self.cwd)
+        return self._git(["symbolic-ref", "--short", "HEAD"], cwd or self.cwd)
 
-    @property
-    def default_branch(self):
+    def default_branch(self, cwd: str = "") -> str:
         """The repo's default branch, or None when it cannot be determined."""
-        head = self._git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], self.cwd)
+        cwd = cwd or self.cwd
+        head = self._git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], cwd)
         if head and "/" in head:
             return head.split("/", 1)[1]
-        configured = self._git(["config", "--get", "init.defaultBranch"], self.cwd)
+        configured = self._git(["config", "--get", "init.defaultBranch"], cwd)
         if configured:
             return configured
         for candidate in ("main", "master"):
-            if self._git(["rev-parse", "--verify", "--quiet", "refs/heads/" + candidate], self.cwd):
+            if self._git(["rev-parse", "--verify", "--quiet", "refs/heads/" + candidate], cwd):
                 return candidate
         return None
 
-    @property
-    def on_default_branch(self) -> bool:
+    def on_default_branch(self, cwd: str = "") -> bool:
         """True only when we positively know HEAD is the default branch."""
-        branch, default = self.branch, self.default_branch
+        branch, default = self.branch(cwd), self.default_branch(cwd)
         return bool(branch and default and branch == default)
+
+    def command_on_default_branch(self, command: str) -> bool:
+        """True when the repo *this command* acts on is on its default branch.
+
+        A `git -C <path>` moves the target away from the invocation cwd - the case this
+        workspace hits constantly, since the root is a repo on `main` while the work
+        happens in `.work/<KEY>/<repo>` on a feature branch. Several targets stays
+        protective: fire if ANY of them is on its default branch.
+        """
+        dirs = git_target_dirs(command)
+        if not dirs:
+            return self.on_default_branch()
+        return any(self.on_default_branch(self._nearest_dir(d)) for d in dirs)
 
     # ---- stack context ----
 
@@ -491,7 +536,9 @@ def suppressed(rule: dict, ctx: Context, event: str, tool_input: dict) -> bool:
         return False
 
     # bash
-    if rule.get("only_on_default_branch") is True and not ctx.on_default_branch:
+    if rule.get("only_on_default_branch") is True and not ctx.command_on_default_branch(
+        tool_input.get("command", "")
+    ):
         return True
     allow_paths = as_list(rule.get("allow_paths"))
     if allow_paths:
