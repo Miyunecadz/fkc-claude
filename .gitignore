@@ -5,6 +5,11 @@
 !/.claude/
 !/.lodestar/
 
+# Agent worktrees live under .claude/ but are checkouts, not setup. `!/.claude/` above
+# un-ignores everything beneath it, so without this a `git add -A` on the default branch
+# would commit an entire working copy of another repo into the router.
+.claude/worktrees/
+
 # Python bytecode from the hooks
 __pycache__/
 *.pyc
