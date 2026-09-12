@@ -1,7 +1,9 @@
 # Freshness — the ticket and the codebase both move
 
 Two silent failures this workflow refuses. Each has its own check, and both are re-run at
-four points: **before presenting the Plan, before Implement, before Review, at Handover.**
+five points across the two commands: **before presenting the Plan and before Implement** in
+`/implement-ticket`; **at entry, before Review, and before the commit** in
+`/implement-review`.
 
 ## 1. The ticket may have moved (Jira)
 
@@ -25,15 +27,47 @@ At each re-check, `mcp__jira__jira_get_issue` again and compare:
 | `updated` unchanged | continue |
 | `updated` moved, fingerprint identical | note it (a comment, a label); continue |
 | summary / description / AC changed | **stop.** Record the diff in `## Freshness`, re-run Analyse for what changed, re-gate the Plan with the user. Never fold a requirement change in silently |
-| status moved to Done / Closed / Cancelled | **stop.** Someone else may have shipped it. Report; set `ALREADY_IMPLEMENTED` or `NOT_NEEDED` only with evidence |
+| status moved to `In Code Review`, `In Staging` or `Production / Release` | **stop.** Someone else may have shipped it. Report; set `ALREADY_IMPLEMENTED` or `NOT_NEEDED` only with evidence |
 | assignee changed to someone else | report before continuing — two people implementing one ticket is worse than a pause |
 
-Also check once, at Locate, whether the work already exists: search Jira for the key in
-other issues, and look for branches already carrying it —
-`git -C <repo> branch -a --list "*<KEY>*"`. A branch someone else pushed is evidence, and
-starting a second one is how two half-implementations happen.
+Also check once, at Locate, whether the work already exists. `.work/<KEY>/` is local and is
+never committed, so the local sidecar cannot tell you what another dev did — only Jira and
+the remote can. Three signals, in descending order of trust:
 
-Never edit, transition, assign or comment on the issue from this workflow.
+| Signal | Written by | Weight |
+|---|---|---|
+| a **delivery comment** carrying this workflow's marker, a branch, a sha and a PR link | the workflow, at `/create-pr` | **authoritative** — and verifiable, open the PR it names |
+| a remote branch carrying the key: `git -C <repo> branch -a --list "*<KEY>*"` | a human or the workflow | strong — someone started this already |
+| status at or past `In Code Review` | a human | corroborating only — humans move tickets by mistake, which is the whole reason the comment exists |
+
+**This project's status ladder, in order** — check it against the real one rather than
+against generic names, because `Done`, `Closed` and `Cancelled` do **not** exist here and a
+rule naming them can never fire:
+
+```
+To Do  →  In Progress  →  In Code Review  →  In Staging  →  Production / Release
+```
+
+`To Do` and `In Progress` are the two that mean the work is still yours. Everything from
+`In Code Review` rightwards means it has already left implementation.
+
+Any of them: report what exists and stop. Starting a second implementation of a delivered
+ticket is what this check prevents, and it is the normal failure when the dev who did the
+work is absent and never pushed.
+
+## 1a. What this workflow may write to Jira
+
+**Never transition, never assign, never edit a field — the description included.** The
+description sits inside `fields-sha`, so writing it would trip this file's own "requirement
+changed → stop and re-gate the Plan" rule on the workflow's own edit.
+
+**One comment is allowed, at one point:** the delivery comment, written by `/create-pr` once
+the PR is confirmed open. It is not decoration — it is the only record of this work that
+travels between machines, and the guard every command checks at Locate.
+
+Posting it moves the issue's `updated`. **Re-read the issue immediately afterwards and
+rewrite the sidecar's `jira:` header**, or the next freshness check reports drift that the
+workflow itself caused.
 
 ## 2. The codebase may have moved (git)
 

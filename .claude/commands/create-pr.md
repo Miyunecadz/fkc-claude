@@ -1,7 +1,7 @@
 ---
 description: Push a reviewed ticket branch and open its Bitbucket pull request — draft, into staging, with one approval gate before anything leaves the machine
 argument-hint: <FKC-123 | ticket key> [repo] [destination] · or --checkout <repo> [destination] for a change with no ticket
-allowed-tools: Task, Agent, SendMessage, Bash, Read, AskUserQuestion, Skill, mcp__jira__jira_get_issue, mcp__bitbucket__bb_get, mcp__bitbucket__bb_post, mcp__bitbucket__bb_put
+allowed-tools: Task, Agent, SendMessage, Bash, Read, AskUserQuestion, Skill, mcp__jira__jira_get_issue, mcp__jira__jira_add_comment, mcp__jira__jira_edit_comment, mcp__bitbucket__bb_get, mcp__bitbucket__bb_post, mcp__bitbucket__bb_put
 effort: high   # an outward-facing action behind an approval gate
 ---
 
@@ -47,6 +47,21 @@ Read `.work/<KEY>/work.md`, and read the Jira issue once with `mcp__jira__jira_g
 say which stage is missing and stop. `PR_OPEN` means a PR already exists: verify it, do not
 open a second.
 
+**Then check the issue itself, because `state:` is local and this ticket may already be
+delivered from another machine.** `.work/<KEY>/` is never committed: a colleague who
+implemented, reviewed and opened the PR on their laptop leaves no trace on yours, and your
+sidecar will happily say `HANDED_OVER` while a PR is already open. That is how one ticket
+gets two PRs.
+
+| On the issue | Then |
+|---|---|
+| a **delivery comment** with this workflow's marker | authoritative. Open the PR it names, confirm it is still open, report it, **stop** |
+| status at or past `In Code Review`, **no** comment | ambiguous — a hand-made PR, or a mis-moved ticket. Report both readings and ask; do not push |
+| neither | proceed |
+
+The preflight's remote-branch check covers the third case, where someone pushed but never
+opened a PR.
+
 No ticket (`--checkout <repo>`): run `.claude/hooks/pr-preflight.sh --checkout <repo>
 [destination]`, say in the output that there is no ticket, and get the requirement from the
 user. Never infer one from the diff.
@@ -81,10 +96,10 @@ Its `stop:` line, a secret flag, or an out-of-scope change ends the run here —
   stage is missing**. Your own reading of the diff is not a review, and a verdict is never
   invented.
 
-  **Never spawn `change-reviewer` from here.** Reviewing is `/implement-ticket`'s Review
+  **Never spawn `change-reviewer` from here.** Reviewing is `/implement-review`'s Review
   stage; a round costs 1.2–2.5M tokens and 2–3 minutes, and one past run spent 4.2M doing
   it three times inside this command. Missing review is a stop condition, not work to pick
-  up.
+  up — send the user to `/implement-review <KEY>`.
 
 - **Validation**: `ticket-delivery`'s `VALIDATION.md` is the only list of checks that exist
   here. Decide whether to re-run **mechanically, not by feel**:
@@ -137,7 +152,53 @@ then report it as created.
 
 Cross-repo: backend first, then the client, each naming the other.
 
-## 6. Report
+## 6. Write the delivery comment on the ticket
+
+**After the PR is verified, before you report.** This is not optional and it is not a
+per-run question: the comment is the only record of this work that leaves the machine, and
+both other commands check for it before starting. Skip it and the next person to pick up
+this ticket implements it a second time.
+
+Post it with `mcp__jira__jira_add_comment` — or `jira_edit_comment` on the existing one if
+the marker is already there, so a re-run updates rather than duplicates. `DESCRIPTION.md`
+owns the wording; the shape is two audiences in one comment:
+
+```
+<!-- fkc-delivery:<KEY> -->
+**Delivered — in review**
+
+<one plain sentence per acceptance criterion: what now happens, in the ticket's own
+language. No file paths, no function names — a non-technical reader is the audience.>
+
+Not yet on Production. This reaches Production when the PR merges to `staging` and a
+separate `staging` → `master` release goes out.
+
+---
+<repo> · `<branch>` · commit `<sha>` · PR #<id> — <url>
+checks: <what actually ran, with results> · not run: <what, and why>
+still manual: <what nobody has exercised>
+```
+
+The AC sentences come from the reviewer's `ACCEPTANCE CRITERIA` rows in the sidecar's
+`## Review`, restated for a PO. The footer is the machine-checkable half — that is what
+makes a mistakenly-moved ticket recoverable:
+
+```bash
+git -C <repo> merge-base --is-ancestor <sha> origin/staging && echo MERGED || echo "NOT MERGED"
+```
+
+Then **re-read the issue and rewrite the sidecar's `jira:` header**. Your own comment moved
+its `updated`; without this the next freshness check reports drift you caused
+(`FRESHNESS.md` §1a).
+
+Never transition the issue, never assign it, never touch its description — the description
+is inside `fields-sha`, and writing it would trip the workflow's own requirement-changed
+stop.
+
+If the post fails, **say so prominently** in the report. The PR stands, but the ticket is
+delivered with no shared record, and the next dev has no guard.
+
+## 7. Report
 
 Short: PR link, branch → destination, draft state, commit, the checks that actually ran, and
 what a human must still do — attach a screenshot, open the paired PR, exercise a path nobody
@@ -147,10 +208,11 @@ has. Append `## PR` to the sidecar and set `state: PR_OPEN` — through the hook
 .claude/hooks/ticket-worktree.sh sidecar append <KEY> PR PR_OPEN <<'EOF'
 - <repo>: PR #<id> <branch> → <destination>, draft — <url>
 - checks: <what ran, with results> · not run: <what, and why>
+- jira: delivery comment posted, fingerprint refreshed
 EOF
 ```
 
-## 7. No agent outruns the report
+## 8. No agent outruns the report
 
 Every agent you dispatch must be **awaited and finished before you report**. Concretely:
 

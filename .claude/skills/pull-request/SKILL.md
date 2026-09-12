@@ -183,6 +183,8 @@ GraphQL schema is the only contract between them and it is unversioned — load
 | The remote branch exists and is not behind | do not push again |
 | A PR exists for this source branch | **do not create a second.** Report its id, state, destination and whether it already contains the new commit. Offer `bb_put` to update title/description, or a push to add commits |
 | `## PR` is already in the sidecar | it was created in an earlier run — verify it instead |
+| The Jira issue carries a **delivery comment** | the ticket was delivered, possibly from another machine. Open the PR it names and verify it; **never open a second**. This is the only check that sees another dev's work — `.work/<KEY>/` is local and never travels |
+| The delivery comment exists but this run added commits | `jira_edit_comment` that same comment — matched by its `<!-- fkc-delivery:<KEY> -->` marker. Never post a second one |
 
 ## 9. Safety
 
@@ -196,7 +198,12 @@ GraphQL schema is the only contract between them and it is unversioned — load
   or `credentials.json`, stop and report — do not commit it and do not remove it silently.
 - Never touch the user's checkouts (`fk-admin-panel-be/`, `fk-admin-panel-fe/`,
   `fk-mobile/`) for a ticket that has a worktree.
-- Never edit, transition, assign or comment on the Jira issue.
+- Never transition, assign, or edit any field of the Jira issue — **the description
+  included**. It sits inside the freshness fingerprint's `fields-sha`, so writing it trips
+  the workflow's own "requirement changed → stop" rule on an edit the workflow made itself.
+  One comment is allowed, and only one: the delivery comment, after the PR is confirmed open
+  (§11). Re-read the issue afterwards and refresh the sidecar's `jira:` header, because
+  posting moved its `updated`.
 
 ## 10. Stop conditions
 
@@ -217,7 +224,31 @@ For a ticket, append to `.work/<KEY>/work.md` — never rewrite a section — an
 commit: <sha> <subject>
 reviewers: <names>
 still manual: <what nobody has exercised>
+jira: delivery comment posted, fingerprint refreshed
 ```
+
+**Then write the delivery comment on the Jira issue** — after the PR is verified, before you
+report. It carries the `<!-- fkc-delivery:<KEY> -->` marker, a plain-language line per
+acceptance criterion for the PO, and a footer with repo, branch, sha, PR link, the checks
+that ran and what is still manual. It says **in review, not on Production**, because a PR
+into `staging` is neither.
+
+Two jobs, not one. For the PO it answers "is this delivered, and how was it addressed?"
+without reading code. For the next dev it is the **only** signal that this ticket already has
+work behind it: `.work/<KEY>/` is local and is never committed, so a colleague's
+implementation is otherwise invisible. The footer's sha makes the claim checkable rather than
+trusted:
+
+```bash
+git -C <repo> merge-base --is-ancestor <sha> origin/staging && echo MERGED || echo "NOT MERGED"
+```
+
+A ticket sitting in Done that prints `NOT MERGED` was moved by mistake. That is the case this
+comment exists to catch.
+
+Re-read the issue afterwards and refresh the sidecar's `jira:` header — posting moved its
+`updated`, and an unrefreshed fingerprint makes the next freshness check report drift the
+workflow caused itself.
 
 Then report, short: the PR link, branch → destination, draft state, commit, the checks that
 actually ran, and what a human must still do — attach a screenshot, open the paired PR,
