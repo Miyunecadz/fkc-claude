@@ -30,20 +30,28 @@ of them:
 
 ## 1. The ticket workspace
 
-Everything for one ticket lives under one directory, so two tickets never share state and
-the user's own checkouts are never touched:
+Everything for one ticket lives under one directory, so two tickets never share state:
 
 ```
 .work/<KEY>/work.md            state sidecar — the only file the main thread writes
-.work/<KEY>/<repo>/            git worktree, branch cut from the fetched remote base
-.work/<KEY>/meta/<repo>.env    BASE_REF / BASE_SHA / BRANCH, recorded at cut time
-.work/<KEY>/meta/<repo>.graph  GRAPH_SHA — which commit the worktree graph was built from
+.work/<KEY>/meta/<repo>.env    MODE / BASE_REF / BASE_SHA / BRANCH, recorded at prepare time
+.work/<KEY>/meta/<repo>.graph  which commit the ticket's graph was built from
 .work/<KEY>/validate/<repo>.log   full check output   (never pasted into context)
 .work/<KEY>/review/<n>.md         full reviewer report (never pasted into context)
+.work/<KEY>/<repo>/            the checkout — worktree mode only; absent in-place
 ```
 
-`.work/` is outside all three repos and the workspace root is not a git repo, so nothing
-here is ever committed by accident. Worktree mechanics: [`WORKTREE.md`](./WORKTREE.md).
+**Where the code lives depends on the mode the user chose**, which is why the last line is
+conditional. `/implement-ticket` asks at §2: a **worktree** under `.work/<KEY>/<repo>/`, or
+**in-place** in the user's own `<repo>/`. Never assemble that path — ask for it:
+
+```bash
+tree=$(.claude/hooks/ticket-worktree.sh tree <KEY> <repo>)
+```
+
+`.work/` itself is outside all three repos and the workspace root is not a git repo, so
+nothing here is ever committed by accident. Both modes, their trade-offs and their rules:
+[`WORKTREE.md`](./WORKTREE.md).
 
 **The sidecar is written through `ticket-worktree.sh sidecar`, never by hand.** The main
 thread has no `Edit` and no `Write`; the subcommand appends the section, sets `state:` and

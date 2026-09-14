@@ -198,8 +198,11 @@ case "${1:-}" in
     found=0
     for repo in $REPOS; do
       [ -n "$only" ] && [ "$only" != "$repo" ] && continue
-      wt="$WORK/$key/$repo"
-      [ -d "$wt" ] || continue
+      # Where the branch is checked out depends on the ticket's mode, so ask rather than
+      # assemble: in-place leaves no directory under .work/<KEY>/ and the tree is the
+      # repo's own checkout.
+      wt=$("$HOOKS/ticket-worktree.sh" tree "$key" "$repo" 2>/dev/null)
+      [ -n "$wt" ] && [ -d "$wt" ] || continue
       found=1
       dest=""
       meta="$WORK/$key/meta/$repo.env"
@@ -210,7 +213,7 @@ case "${1:-}" in
       fi
       inspect "$wt" "$repo" "$dest" "$repo"
     done
-    [ "$found" = "1" ] || { echo "no worktrees under .work/$key."; exit 2; }
+    [ "$found" = "1" ] || { echo "no prepared repos for .work/$key."; exit 2; }
     ;;
 esac
 

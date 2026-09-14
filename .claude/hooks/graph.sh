@@ -14,6 +14,7 @@
 #   graph.sh status                          inventory: every repo + every worktree
 #   graph.sh resolve <path>                  which map describes <path>, and is it current
 #   graph.sh ensure  <path>                  rebuild that map if the code moved
+#   graph.sh label   <path> [--full]         (re)name its communities
 #   graph.sh query   <path> "<question>" [..] ensure, then BFS traversal
 #   graph.sh affected <path> "<node>" [..]   ensure, then reverse traversal
 #   graph.sh explain  <path> "<node>"        ensure, then neighbourhood explanation
@@ -109,6 +110,40 @@ resolve() {
   else STATE=stale; fi
 }
 
+# ------------------------------------------------------------------- labelling
+# A code-only extract produces communities numbered 0..N and nothing else. `query` reads
+# their names from .graphify_labels.json beside the graph, so an unlabelled map answers
+# with bare integers and BFS has nothing to anchor a question like "where do subcontract
+# order task lines live" to — it matches raw identifiers only and lands in a plausible
+# neighbouring region. That is the difference between a worktree map and the workspace
+# map, and it is why implementations built from worktree maps drifted off target.
+#
+# Naming needs an LLM but not an API key: graphify's claude-cli backend shells out to the
+# installed claude CLI. Measured on fk-admin-panel-be (2094 nodes, 359 communities):
+# ~32s for a full pass, 0.7s for --missing-only when nothing is missing — cheap enough to
+# run after every rebuild rather than being something to remember.
+label_tree() { # label_tree <tree> <log> [--full]
+  local tree="$1" log="$2" full="${3:-}" backend=()
+  command -v graphify >/dev/null || return 0
+  # A configured key wins; claude-cli is the fallback that needs none. graphify's own
+  # auto-detection deliberately never picks claude-cli, so name it explicitly.
+  if [ -z "${GEMINI_API_KEY:-}${GOOGLE_API_KEY:-}${ANTHROPIC_API_KEY:-}${OPENAI_API_KEY:-}" ]; then
+    command -v claude >/dev/null || {
+      echo "graph: NOT LABELLED — no LLM backend and no claude CLI. Community names will be" >&2
+      echo "       bare integers; treat query results as structural only." >&2
+      return 0
+    }
+    backend=(--backend=claude-cli)
+  fi
+  local args=(--missing-only)
+  [ "$full" = "--full" ] && args=()
+  if graphify label "$tree" "${args[@]}" "${backend[@]}" >>"$log" 2>&1; then
+    grep -iE 'communities' "$log" | tail -1
+  else
+    echo "graph: labelling failed — map is usable but community names are missing (see $log)" >&2
+  fi
+}
+
 write_stamp() {
   mkdir -p "$(dirname "$STAMPFILE")"
   { echo "GRAPH_SHA=$(git -C "$TREE" rev-parse HEAD 2>/dev/null)"
@@ -163,6 +198,11 @@ cmd_ensure() {
     echo "Read the source instead. Do NOT query a stale map as if it described this tree."
     return 1
   fi
+  # Name the communities before the stamp: a map recorded as current must be a map that
+  # can actually answer by name. A fresh extract has no labels at all; an update carries
+  # the old ones forward and only needs the communities the new code created.
+  label_tree "$TREE" "$log" "$( [ "$mode" = extract ] && echo --full )"
+
   write_stamp "$SCOPE-$mode"
   grep -iE 'nodes|edges|communities|updated' "$log" | tail -2
 
@@ -205,6 +245,14 @@ run_q() {
   graphify "$sub" "$@" --graph "$GRAPH"
 }
 
+cmd_label() {
+  resolve "${1:-.}"
+  need_cli
+  [ -f "$GRAPH" ] || die "no map at ${GRAPH#"$ROOT"/} yet — graph.sh ensure ${1:-.} first"
+  label_tree "$TREE" "${TMPDIR:-/tmp}/graph-label-$REPO${KEY:+-$KEY}.log" "${2:-}"
+  echo "graph: ${GRAPH#"$ROOT"/} labelled"
+}
+
 cmd_status() {
   echo "## Graphify maps in this workspace"
   echo
@@ -237,9 +285,10 @@ case "${1:-}" in
   status)   shift; cmd_status "$@" ;;
   resolve)  shift; cmd_resolve "$@" ;;
   ensure)   shift; cmd_ensure "$@" ;;
+  label)    shift; cmd_label  "$@" ;;
   query)    shift; run_q query "$@" ;;
   affected) shift; run_q affected "$@" ;;
   explain)  shift; run_q explain "$@" ;;
   path)     shift; run_q path "$@" ;;
-  *) die "usage: graph.sh {status|resolve|ensure|query|affected|explain|path} [<path>] [args]" ;;
+  *) die "usage: graph.sh {status|resolve|ensure|label|query|affected|explain|path} [<path>] [args]" ;;
 esac

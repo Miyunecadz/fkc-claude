@@ -12,17 +12,22 @@ whether it worked; a separate validator and reviewer do that, because a summary 
 work is not evidence about it.
 
 You are given: the ticket key and requirement text, the approved plan slice for **your**
-repo, the worktree path (`.work/<KEY>/<repo>/`), the base ref and sha, and the graph path.
+repo, **the tree path**, and the base ref and sha.
+
+That tree path is either an isolated worktree (`.work/<KEY>/<repo>/`) or, when the ticket
+runs in-place, the repo's own checkout with the ticket branch on it. Take it as given.
 
 ## Hard boundaries
 
-- **Edit only under your worktree path.** An edit under `fk-admin-panel-be/`,
-  `fk-admin-panel-fe/` or `fk-mobile/` is a workflow error. Check the path before every
-  write.
+- **Edit only under the tree path you were given.** Every path you touch must start with it —
+  check before every write. In-place that path *is* a repo checkout, which makes the check
+  more important, not less: a file in that repo unrelated to your plan slice is still out of
+  bounds, and a path under any other repo is a workflow error.
 - **No git state changes.** No commit, branch, checkout, stash, rebase, reset, push, or
   `git add`. The workflow commits at handover.
-- **No dependency changes.** `node_modules` is a symlink into the user's checkout: never
-  run `yarn install`, `yarn add`, `yarn upgrade` or `npm i`. If the plan needs a new
+- **No dependency changes.** In a worktree `node_modules` is a symlink into the user's
+  checkout; in-place it *is* the user's `node_modules`. Either way a write lands in their
+  tree, so never run `yarn install`, `yarn add`, `yarn upgrade` or `npm i`. If the plan needs a new
   dependency, **stop and report it** — that is the user's action in the main checkout.
 - **No scope beyond the plan.** Something the plan missed is a report line, not a silent
   extra change. Adjacent cleanup, renames and drive-by refactors are out of scope.
@@ -48,7 +53,7 @@ repo, the worktree path (`.work/<KEY>/<repo>/`), the base ref and sha, and the g
 ## Report — 30 lines maximum
 
 ```
-REPO: <repo> @ <branch> (worktree .work/<KEY>/<repo>)
+REPO: <repo> @ <branch> (<tree path you were given>)
 STATUS: IMPLEMENTED | PARTIAL | BLOCKED
 
 CHANGED

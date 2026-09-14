@@ -105,7 +105,8 @@ Its `stop:` line, a secret flag, or an out-of-scope change ends the run here —
   here. Decide whether to re-run **mechanically, not by feel**:
 
   ```bash
-  git -C .work/<KEY>/<repo> rev-parse --short HEAD     # against the sha in ## Validate
+  tree=$(.claude/hooks/ticket-worktree.sh tree <KEY> <repo>)
+  git -C "$tree" rev-parse --short HEAD                # against the sha in ## Validate
   ```
 
   Same sha → the sidecar's result stands; cite it and move on. Different → dispatch

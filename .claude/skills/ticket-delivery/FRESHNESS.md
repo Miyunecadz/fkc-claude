@@ -106,18 +106,25 @@ Prepare and again after every `sync`:
 
 - If the worktree HEAD is exactly the commit the workspace map was built from, it copies
   that map instead of re-extracting — same content, no cost.
-- Otherwise it runs `graphify extract <worktree> --force --code-only` and records
-  `GRAPH_SHA=<worktree HEAD>` so `check` can tell later that the graph and the code have
-  drifted apart.
-- Query it explicitly, never by default path:
+- Otherwise it runs `graphify extract <tree> --force --code-only`, then **labels the
+  communities** (`graph.sh label`, ~30s, no API key — it falls back to the claude CLI), and
+  records the stamp so `check` can tell later that the graph and the code have drifted apart.
+  The label pass is not optional polish: `query` reads community names from
+  `.graphify_labels.json` beside the graph, and an unlabelled map answers with bare integers,
+  leaving BFS nothing to anchor a question on but raw identifiers. That is how an analysis
+  lands one module away from the right one.
+- In-place there is no second map: the repo's own — already labelled — is the ticket's, and
+  `graph.sh ensure` keeps it current.
+- Query by tree path, never by default path and never with `--graph`:
 
 ```bash
-.claude/hooks/graph.sh query    .work/<KEY>/<repo> "<question>"
-.claude/hooks/graph.sh affected .work/<KEY>/<repo> "<node>"
+tree=$(.claude/hooks/ticket-worktree.sh tree <KEY> <repo>)
+.claude/hooks/graph.sh query    "$tree" "<question>"
+.claude/hooks/graph.sh affected "$tree" "<node>"
 ```
 
-`graph.sh` resolves the worktree's own map from that path, so the workspace map cannot be
-reached by accident, and it **re-checks freshness on every query** — against HEAD *and* the
+`graph.sh` resolves the right map from that path — the worktree's own in worktree mode, the
+repo's in-place — so the wrong one cannot be reached by accident, and it **re-checks freshness on every query** — against HEAD *and* the
 dirty working tree, then rebuilds incrementally (~3s) before answering. That closes the
 window `check` leaves open: `check` compares HEAD only, so a graph built before three
 uncommitted edits still reads `fresh` to it while describing code that is no longer there.

@@ -7,7 +7,8 @@
 # the loop and keeps its context free of git noise — it prints a fixed metadata block,
 # never a diff and never file contents.
 #
-# ticket-worktree.sh prepare <KEY> <repo> <base-ref> [<branch>] create / reuse
+# ticket-worktree.sh prepare <KEY> <repo> <base-ref> [<branch>] [--in-place] create / reuse
+# ticket-worktree.sh tree <KEY> <repo> print the tree path for this ticket
 # ticket-worktree.sh status <KEY> [repo] state of each worktree
 # ticket-worktree.sh list every ticket workspace
 # ticket-worktree.sh clean <KEY> [repo] drop build output, keep the code
@@ -23,10 +24,23 @@
 # only the new body, and updates the section, 'state:' and the '## Log' line in one
 # atomic step, which is also the rule the workflow kept breaking by hand.
 #
+# Two modes, chosen per ticket by the workflow (see MODE in the meta file):
+#
+#   worktree  (--in-place absent)  the branch is checked out at .work/<KEY>/<repo>/ and the
+#             user's own checkout is never touched. Required for two tickets at once, and
+#             for a cross-repo ticket whose repos are built in parallel.
+#   in-place  (--in-place)         the branch is checked out in the user's own <repo>/ and
+#             .work/<KEY>/ holds only the sidecar, the meta and the logs — no source. One
+#             ticket at a time, and the repo's own labelled graphify map answers queries,
+#             which is the map with community names on it.
+#
+# Nothing downstream should build the tree path itself. Ask for it:
+#   tree=$(.claude/hooks/ticket-worktree.sh tree <KEY> <repo>)
+#
 # Layout (workspace root is NOT a git repo — each repo has its own):
 # .work/<KEY>/work.md state sidecar, written by the workflow
-# .work/<KEY>/<repo>/ the worktree
-# .work/<KEY>/meta/<repo>.env BASE_REF / BASE_SHA / BRANCH, recorded at prepare time
+# .work/<KEY>/<repo>/ the worktree (worktree mode only; absent in-place)
+# .work/<KEY>/meta/<repo>.env MODE / BASE_REF / BASE_SHA / BRANCH, recorded at prepare time
 # .work/<KEY>/validate/ validator logs (kept out of model context)
 # .work/<KEY>/review/ reviewer reports
 #
@@ -45,15 +59,76 @@ valid_key() { echo "$1" | grep -qE '^[A-Za-z][A-Za-z0-9]*-[0-9]+$'; }
 
 meta_of() { echo "$WORK/$1/meta/$2.env"; }
 
+# ---- where does this ticket's code live? -------------------------------------------
+# One answer, in one place. Everything downstream — status, clean, remove, freshness,
+# validation, review, the PR — asks here instead of assembling ".work/$KEY/$repo", which
+# is only correct in worktree mode and silently wrong in-place.
+
+mode_of() { # mode_of <key> <repo> -> worktree | in-place | ""
+ local m=""; local f; f=$(meta_of "$1" "$2")
+ [ -f "$f" ] && m=$(sed -n 's/^MODE=//p' "$f")
+ # Meta written before modes existed records no MODE; a directory there means worktree.
+ [ -n "$m" ] || { [ -d "$WORK/$1/$2" ] && m=worktree; }
+ echo "$m"
+}
+
+tree_of() { # tree_of <key> <repo> -> absolute path to the checkout holding the branch
+ case "$(mode_of "$1" "$2")" in
+  in-place) echo "$ROOT/$2" ;;
+  worktree) echo "$WORK/$1/$2" ;;
+  *)        echo "" ;;
+ esac
+}
+
+# Repos this ticket has prepared, in either mode. Scope is the meta file, never a
+# directory listing: in-place leaves no directory under .work/<KEY>/.
+repos_in_play() { # repos_in_play <key>
+ local r; for r in $REPOS; do [ -f "$(meta_of "$1" "$r")" ] && echo "$r"; done
+}
+
+cmd_tree() {
+ local key="${1:-}" repo="${2:-}"
+ [ -n "$key" ] && [ -n "$repo" ] || die "usage: tree <KEY> <repo>"
+ local t; t=$(tree_of "$key" "$repo")
+ [ -n "$t" ] || die "$repo is not prepared for $key — run prepare first."
+ echo "$t"
+}
+
+# In-place claims the user's checkout, so only one ticket may hold a repo that way.
+in_place_conflict() { # in_place_conflict <key> <repo> -> prints the other key, if any
+ local d k; for d in "$WORK"/*/; do
+  [ -d "$d" ] || continue
+  k=$(basename "$d"); [ "$k" = "$1" ] && continue
+  [ -f "$WORK/$k/meta/$2.env" ] || continue
+  [ "$(mode_of "$k" "$2")" = "in-place" ] && { echo "$k"; return; }
+ done
+}
+
 # ---- prepare ----------------------------------------------------------------------
 cmd_prepare() {
- local key="${1:-}" repo="${2:-}" base="${3:-}" branch="${4:-}"
- [ -n "$key" ] && [ -n "$repo" ] && [ -n "$base" ] || die "usage: prepare <KEY> <repo> <base-ref> [branch]"
+ local key="" repo="" base="" branch="" in_place=0 pos=0
+ for a in "$@"; do
+  case "$a" in
+   --in-place) in_place=1 ;;
+   --worktree) in_place=0 ;;
+   *) pos=$((pos+1))
+      case "$pos" in 1) key="$a" ;; 2) repo="$a" ;; 3) base="$a" ;; 4) branch="$a" ;; esac ;;
+  esac
+ done
+ [ -n "$key" ] && [ -n "$repo" ] && [ -n "$base" ] || die "usage: prepare <KEY> <repo> <base-ref> [branch] [--in-place]"
  valid_key "$key" || die "'$key' is not a ticket key (expected e.g. FKC-123)."
  valid_repo "$repo" || die "'$repo' is not a repo in this workspace ($REPOS)."
  [ -d "$ROOT/$repo/.git" ] || die "$ROOT/$repo is not a git checkout." 2
 
+ # A repo already prepared for this ticket keeps the mode it was prepared with. Switching
+ # mode mid-ticket would move the branch out from under work that is already in progress.
+ local existing; existing=$(mode_of "$key" "$repo")
+ if [ -n "$existing" ]; then
+  case "$existing" in in-place) in_place=1 ;; worktree) in_place=0 ;; esac
+ fi
+
  local wt="$WORK/$key/$repo"
+ [ "$in_place" = "1" ] && wt="$ROOT/$repo"
  branch="${branch:-ticket/$key}"
 
  # Always fetch: the base must be the remote's current tip, not a local ref that has
@@ -71,30 +146,67 @@ cmd_prepare() {
  fi
  base_sha=$(git -C "$ROOT/$repo" rev-parse --short "$base_ref")
 
- if [ -d "$wt" ]; then
- echo "## Worktree: $key / $repo (existing — reused)"
- else
  mkdir -p "$WORK/$key/meta" "$WORK/$key/validate" "$WORK/$key/review"
- if git -C "$ROOT/$repo" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
- git -C "$ROOT/$repo" worktree add "$wt" "$branch" >/dev/null 2>&1 \
- || die "cannot add worktree for existing branch $branch (already checked out elsewhere?)" 2
+ local prev_branch=""
+
+ if [ "$in_place" = "1" ]; then
+  # In-place takes over the user's own checkout, so the two ways that can destroy
+  # their work are refused outright rather than warned about.
+  local other; other=$(in_place_conflict "$key" "$repo")
+  [ -z "$other" ] || die "$repo is already held in-place by $other. Finish or switch that ticket to a worktree first, or prepare this one with a worktree."
+  prev_branch=$(git -C "$ROOT/$repo" rev-parse --abbrev-ref HEAD 2>/dev/null)
+
+  if [ "$(git -C "$ROOT/$repo" rev-parse --abbrev-ref HEAD 2>/dev/null)" = "$branch" ]; then
+   echo "## In-place: $key / $repo (already on $branch — reused)"
+   prev_branch=$(sed -n 's/^PREV_BRANCH=//p' "$(meta_of "$key" "$repo")" 2>/dev/null)
+  else
+   [ -z "$(git -C "$ROOT/$repo" status --porcelain)" ] \
+    || die "$repo has uncommitted changes. In-place would switch its branch under them — commit or set them aside first, or prepare this ticket with a worktree."
+   if git -C "$ROOT/$repo" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
+    git -C "$ROOT/$repo" checkout "$branch" >/dev/null 2>&1 \
+     || die "cannot check out existing branch $branch in $repo (checked out in a worktree?)" 2
+   else
+    git -C "$ROOT/$repo" checkout -b "$branch" "$base_ref" >/dev/null 2>&1 \
+     || die "cannot create branch $branch from $base_ref in $repo" 2
+   fi
+   echo "## In-place: $key / $repo (branch checked out in your own checkout)"
+  fi
+ elif [ -d "$wt" ]; then
+  echo "## Worktree: $key / $repo (existing — reused)"
  else
- git -C "$ROOT/$repo" worktree add -b "$branch" "$wt" "$base_ref" >/dev/null 2>&1 \
- || die "git worktree add failed for $repo" 2
+  if git -C "$ROOT/$repo" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
+   git -C "$ROOT/$repo" worktree add "$wt" "$branch" >/dev/null 2>&1 \
+    || die "cannot add worktree for existing branch $branch (already checked out elsewhere?)" 2
+  else
+   git -C "$ROOT/$repo" worktree add -b "$branch" "$wt" "$base_ref" >/dev/null 2>&1 \
+    || die "git worktree add failed for $repo" 2
+  fi
+  echo "## Worktree: $key / $repo (created)"
  fi
- cat > "$(meta_of "$key" "$repo")" <<META
+
+ if [ ! -f "$(meta_of "$key" "$repo")" ]; then
+  cat > "$(meta_of "$key" "$repo")" <<META
+MODE=$( [ "$in_place" = "1" ] && echo in-place || echo worktree )
 BASE_REF=$base_ref
 BASE_SHA=$base_sha
 BRANCH=$branch
+PREV_BRANCH=$prev_branch
 CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 META
- echo "## Worktree: $key / $repo (created)"
  fi
 
  # Dependencies: link, never install. A worktree has no node_modules of its own and a
  # React Native install is slow; the link makes the repo's real checks runnable here.
  # Writing through it would mutate the main checkout, so installs are refused below.
- local linked="none"
+ # In-place has neither problem: it *is* the main checkout, so its dependencies and env
+ # files are the real ones already. Nothing to link, and nothing that could be written
+ # through a link into somebody else's tree.
+ local linked="none" envs=0
+ if [ "$in_place" = "1" ]; then
+  if [ -d "$ROOT/$repo/node_modules" ]; then linked="the checkout's own"
+  else linked="ABSENT — $repo has no node_modules; its yarn checks cannot run"; fi
+  envs=$(find "$ROOT/$repo" -maxdepth 1 -name '.env' -o -maxdepth 1 -name '.env.*' 2>/dev/null | wc -l | tr -d ' ')
+ else
  if [ ! -e "$wt/node_modules" ] && [ -d "$ROOT/$repo/node_modules" ]; then
  ln -s "$ROOT/$repo/node_modules" "$wt/node_modules" && linked="linked from $repo/node_modules"
  elif [ -L "$wt/node_modules" ]; then
@@ -107,40 +219,56 @@ META
 
  # Untracked env files are not in the worktree; link them so a build reads the same
  # config as the main checkout. Contents are never printed by anything here.
- local envs=0
  for f in "$ROOT/$repo"/.env "$ROOT/$repo"/.env.*; do
  [ -f "$f" ] || continue
  local b; b=$(basename "$f")
  [ -e "$wt/$b" ] || { ln -s "$f" "$wt/$b" && envs=$((envs+1)); }
  done
+ fi
 
+ local MODE="" BASE_REF="" BASE_SHA="" BRANCH="" PREV_BRANCH=""
  # shellcheck disable=SC1090
  . "$(meta_of "$key" "$repo")"
  cat <<OUT
+mode: $MODE
 path: ${wt#"$ROOT"/}
 branch: $BRANCH
 base: $BASE_REF @ $BASE_SHA
 deps: $linked
-env: $envs file(s) linked from $repo
-next: edit only under ${wt#"$ROOT"/} — never under $repo/
+env: $envs file(s)
 OUT
+ if [ "$MODE" = "in-place" ]; then
+  cat <<OUT
+was: $repo was on ${PREV_BRANCH:-?} — restore it with: git -C $repo checkout ${PREV_BRANCH:-<branch>}
+next: edit under $repo/ as usual. The branch is checked out there; .work/$key holds only
+       the sidecar, meta and logs. Graph queries resolve to the repo's own labelled map.
+OUT
+ else
+  echo "next: edit only under ${wt#"$ROOT"/} — never under $repo/"
+ fi
 }
 
 # ---- status -----------------------------------------------------------------------
 one_status() {
- local key="$1" repo="$2" wt="$WORK/$1/$2"
- [ -d "$wt" ] || { echo "- $repo: no worktree"; return; }
+ local key="$1" repo="$2" wt; wt=$(tree_of "$1" "$2")
+ [ -n "$wt" ] && [ -d "$wt" ] || { echo "- $repo: not prepared"; return; }
  local meta; meta=$(meta_of "$key" "$repo")
- local BASE_REF="?" BASE_SHA="?" BRANCH="?"
+ local MODE="worktree" BASE_REF="?" BASE_SHA="?" BRANCH="?"
  # shellcheck disable=SC1090
  [ -f "$meta" ] && . "$meta"
+ # In-place shares the checkout with the user, so HEAD may simply not be this ticket.
+ if [ "$MODE" = "in-place" ] && [ "$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null)" != "$BRANCH" ]; then
+  echo "- $repo [in-place]: NOT CHECKED OUT — $repo is on $(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null), ticket branch is $BRANCH"
+  echo " ! nothing here belongs to $key right now; re-run prepare to resume it"
+  return
+ fi
  git -C "$wt" fetch --prune --quiet origin 2>/dev/null
  local head dirty ahead behind moved
  head=$(git -C "$wt" rev-parse --short HEAD 2>/dev/null)
  dirty=$(git -C "$wt" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
  read -r behind ahead <<<"$(git -C "$wt" rev-list --left-right --count "$BASE_REF...HEAD" 2>/dev/null || echo '? ?')"
  moved=$(git -C "$wt" rev-parse --short "$BASE_REF" 2>/dev/null)
- echo "- $repo: $BRANCH @ $head | base $BASE_REF cut@$BASE_SHA now@$moved | +$ahead/-$behind | dirty:$dirty"
+ echo "- $repo [$MODE]: $BRANCH @ $head | base $BASE_REF cut@$BASE_SHA now@$moved | +$ahead/-$behind | dirty:$dirty"
  [ "$moved" != "$BASE_SHA" ] && [ "$moved" != "" ] && \
  echo " ! base branch moved since this worktree was cut — rebase or re-check before review"
  [ "$dirty" != "0" ] && echo " ! uncommitted changes in the worktree"
@@ -152,7 +280,7 @@ cmd_status() {
  echo "## Ticket workspace: $key"
  echo "sidecar: $( [ -f "$WORK/$key/work.md" ] && echo ".work/$key/work.md" || echo 'none — the workflow writes it' )"
  if [ -n "${2:-}" ]; then one_status "$key" "$2"; else
- for r in $REPOS; do [ -d "$WORK/$key/$r" ] && one_status "$key" "$r"; done
+ for r in $(repos_in_play "$key"); do one_status "$key" "$r"; done
  fi
 }
 
@@ -166,7 +294,7 @@ cmd_list() {
  local state="-"
  [ -f "$d/work.md" ] && state=$(grep -m1 '^state:' "$d/work.md" | sed 's/^state:[[:space:]]*//')
  local repos=""
- for r in $REPOS; do [ -d "$d/$r" ] && repos="$repos $r"; done
+ for r in $(repos_in_play "$key"); do repos="$repos $r[$(mode_of "$key" "$r")]"; done
  echo "- $key: state=${state:--}, repos:${repos:- none}"
  local blocked; blocked=$(grep '^blocked:' "$d/work.md" 2>/dev/null | sed 's/^blocked:[[:space:]]*//')
  [ -n "$blocked" ] && [ "$blocked" != "-" ] && echo " BLOCKED: $blocked"
@@ -190,9 +318,15 @@ cmd_clean() {
  for a in "$@"; do repo="$a"; done
  [ -n "$key" ] || die "usage: clean <KEY> [repo]"
  [ -d "$WORK/$key" ] || die "no workspace at .work/$key"
- local targets="$REPOS"; [ -n "$repo" ] && targets="$repo"
+ local targets; targets=$(repos_in_play "$key"); [ -n "$repo" ] && targets="$repo"
  for r in $targets; do
-  local wt="$WORK/$key/$r"; [ -d "$wt" ] || continue
+  # In-place builds into the user's own checkout, where the build output is theirs and
+  # predates the ticket. Deleting it would cost them a rebuild they never asked for.
+  if [ "$(mode_of "$key" "$r")" = "in-place" ]; then
+   echo "- $r: skipped — in-place, the build output belongs to your checkout"
+   continue
+  fi
+  local wt; wt=$(tree_of "$key" "$r"); [ -n "$wt" ] && [ -d "$wt" ] || continue
   local freed=0 removed=""
   for a in $ARTIFACT_DIRS; do
    local path="$wt/$a"
@@ -223,9 +357,19 @@ cmd_remove() {
  for a in "$@"; do case "$a" in --force) force=1 ;; *) repo="$a" ;; esac; done
  [ -n "$key" ] || die "usage: remove <KEY> [repo] [--force]"
  [ -d "$WORK/$key" ] || die "no workspace at .work/$key"
- local targets="$REPOS"; [ -n "$repo" ] && targets="$repo"
+ local targets; targets=$(repos_in_play "$key"); [ -n "$repo" ] && targets="$repo"
  for r in $targets; do
- local wt="$WORK/$key/$r"; [ -d "$wt" ] || continue
+ # In-place has no worktree to tear down — the "teardown" is the user getting their own
+ # branch back, which is theirs to do, not this script's.
+ if [ "$(mode_of "$key" "$r")" = "in-place" ]; then
+  local PREV_BRANCH=""
+  # shellcheck disable=SC1090
+  . "$(meta_of "$key" "$r")" 2>/dev/null || true
+  echo "- $r: in-place — nothing to remove. When you are done here:"
+  echo "    git -C $r checkout ${PREV_BRANCH:-<your branch>}"
+  continue
+ fi
+ local wt; wt=$(tree_of "$key" "$r"); [ -n "$wt" ] && [ -d "$wt" ] || continue
  local dirty; dirty=$(git -C "$wt" status --porcelain | wc -l | tr -d ' ')
  local unpushed; unpushed=$(git -C "$wt" log --oneline @{upstream}..HEAD 2>/dev/null | wc -l | tr -d ' ')
  [ -z "$unpushed" ] && unpushed=$(git -C "$wt" rev-list --count HEAD ^origin/HEAD 2>/dev/null || echo 0)
@@ -389,10 +533,11 @@ SIDECAR
 
 case "${1:-}" in
  prepare) shift; cmd_prepare "$@" ;;
+ tree) shift; cmd_tree "$@" ;;
  status) shift; cmd_status "$@" ;;
  list) shift; cmd_list "$@" ;;
  clean) shift; cmd_clean "$@" ;;
  remove) shift; cmd_remove "$@" ;;
  sidecar) shift; cmd_sidecar "$@" ;;
- *) die "usage: ticket-worktree.sh {prepare|status|list|clean|remove|sidecar} ..." ;;
+ *) die "usage: ticket-worktree.sh {prepare|tree|status|list|clean|remove|sidecar} ..." ;;
 esac

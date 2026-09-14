@@ -159,8 +159,9 @@ when a finding stands.
 
 Repeat the push warning whenever the work may outlive today:
 
-> `.work/<KEY>/` is local and is never committed. If anyone else may pick this up, push it:
-> `git -C .work/<KEY>/<repo> push -u origin <branch>`
+> The branch is local and `.work/<KEY>/` is never committed. If anyone else may pick this
+> up, push it: `git -C <tree> push -u origin <branch>`
+> (`<tree>` from `.claude/hooks/ticket-worktree.sh tree <KEY> <repo>`.)
 
 Use the sidecar's vocabulary. `VERIFIED` means the applicable checks ran and passed.
 `REVIEWED` means the reviewer returned PASS. `HANDED_OVER` means committed in the worktree and

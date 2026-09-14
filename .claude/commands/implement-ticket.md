@@ -117,30 +117,73 @@ If `.work/<KEY>/work.md` exists, read it and **resume from `state:`**:
 
 Re-running this command must never repeat completed work or duplicate a sidecar section.
 
-## 2. Prepare the workspace — one worktree per repo, one graph per worktree
+## 2. Prepare the workspace — ask which mode, then one graph per tree
 
-For each repo in scope:
+### 2a. Ask the user: in-place, or a worktree?
+
+**Ask every time, with `AskUserQuestion`, before preparing anything.** Do not infer the mode
+from the ticket, and do not carry a previous ticket's answer forward — only the user knows
+whether they are about to pick up a second ticket or leave this one half-done overnight.
+
+Skip the question only when `.work/<KEY>/meta/<repo>.env` already records a `MODE`: a ticket
+keeps the mode it was prepared with, because switching mid-ticket moves the branch out from
+under work in progress.
+
+Put it to them roughly like this, with the trade-off stated rather than implied:
+
+- **In-place** *(default for a single ticket)* — the branch is checked out in your own
+  `<repo>/`, and `.work/<KEY>/` holds only the sidecar, meta and logs. Queries resolve to the
+  repo's own map, which is the **labelled** one, so analysis anchors on real community names.
+  Requires a clean checkout, switches your branch, and holds that repo until you are done.
+- **Worktree** — an isolated checkout at `.work/<KEY>/<repo>/`; your checkout keeps its branch
+  and its uncommitted work. Needed for a second ticket in flight, or a cross-repo ticket whose
+  repos are built in parallel. Costs disk, and its map has to be labelled after extraction.
+
+Whatever they pick, record it verbatim in the sidecar — it is a gate decision like any other.
+
+### 2b. Prepare each repo in scope
 
 ```bash
-.claude/hooks/ticket-worktree.sh prepare <KEY> <repo> <base> <type>/<KEY>-<slug>
+.claude/hooks/ticket-worktree.sh prepare <KEY> <repo> <base> <type>/<KEY>-<slug> [--in-place]
 .claude/hooks/ticket-freshness.sh graph   <KEY> <repo>
+```
+
+`prepare` refuses in-place when the checkout is dirty or another ticket already holds that
+repo in-place. Those refusals are the point — relay them and ask rather than working around
+them; a worktree is always the answer that cannot cost the user their working state.
+
+**Never build the tree path yourself.** `.work/<KEY>/<repo>` is only correct in worktree mode.
+Ask once per repo and pass what comes back to every agent:
+
+```bash
+.claude/hooks/ticket-worktree.sh tree <KEY> <repo>    # -> the checkout holding the branch
 ```
 
 Choose `<base>` from evidence, not from name-matching — the ticket's environment,
 `docs/_shared/env-matrix.md`, then git (`WORKTREE.md` §2). Ask before you commit to a base
 you inferred.
 
-The graph step is what stops the analysis being answered from another branch: it builds the
-map **from the worktree's own commit**, or reuses the workspace map when that map already
-describes exactly this commit. Every agent gets `.work/<KEY>/<repo>/graphify-out/graph.json`
-and is forbidden the workspace map.
+The graph step is what stops the analysis being answered from another branch. What it does
+depends on the mode, and in both cases it ends with a map that is **labelled** — a map whose
+communities are still bare integers answers structurally but cannot anchor a question like
+"where do subcontract order task lines live", which is how an analysis lands one module over
+from the right one:
 
-Agents reach it through the resolver, addressing it by worktree path rather than by `--graph`:
+- **in-place** — the repo's own map is the ticket's map; `graph.sh ensure` keeps it current.
+- **worktree** — extract from the worktree's own commit, then label it (~30s), or copy the
+  workspace map *and its label sidecars* when it already describes exactly this commit.
+
+Agents reach it through the resolver, addressing it by the tree path rather than by `--graph`:
 
 ```bash
-.claude/hooks/graph.sh query    .work/<KEY>/<repo> "<question>"
-.claude/hooks/graph.sh affected .work/<KEY>/<repo> "<symbol>"
+tree=$(.claude/hooks/ticket-worktree.sh tree <KEY> <repo>)
+.claude/hooks/graph.sh query    "$tree" "<question>"
+.claude/hooks/graph.sh affected "$tree" "<symbol>"
 ```
+
+Agents are given that path and query only it. The rule that used to read "forbidden the
+workspace map" is really "never choose a map by hand" — in-place the workspace map *is* the
+right one, and `graph.sh` is what knows the difference.
 
 `graph.sh` re-verifies the map against HEAD **and** the dirty tree on every call and rebuilds
 it incrementally when either moved, so a map cannot go quietly stale mid-implementation the
@@ -151,8 +194,11 @@ Create the sidecar now — through the hook, not by hand:
 ```bash
 .claude/hooks/ticket-worktree.sh sidecar init   <KEY> "<ticket summary>"
 .claude/hooks/ticket-worktree.sh sidecar header <KEY> jira="updated=<ISO> status=<name> fields-sha=<8hex>" \
-                                                     repos="<repo>@<branch> from <base>@<sha>" graph="<repo>=worktree-extract@<sha>"
+                                                     repos="<repo>@<branch> from <base>@<sha> (<mode>)" graph="<repo>=<source>@<sha>"
 ```
+
+Record the mode in `repos=`. A resumed run reads it from the meta file, but a human reading
+the sidecar needs to know whether the code is in their checkout or under `.work/`.
 
 ## 3. Run the stages
 
@@ -223,14 +269,16 @@ rather than before.
 
 Your closing report must tell them, in this order:
 
-1. **what changed**, per repo, with the worktree path and branch;
-2. **how to read it**: `git -C .work/<KEY>/<repo> diff <base>...HEAD`;
+1. **what changed**, per repo, with the mode, the tree path and the branch;
+2. **how to read it**: `git -C <tree> diff <base>...HEAD`, with `<tree>` as
+   `ticket-worktree.sh tree` returned it — in-place that is the repo itself, so say so
+   plainly: *"this is checked out in your own `<repo>/` right now"*;
 3. **what to run next**: `/implement-review <KEY>` — it validates, reviews and commits;
 4. **the push warning**, whenever the work may outlive today:
 
-   > This ticket lives only on this machine — `.work/<KEY>/` is local and is never committed.
-   > If anyone else may need to pick it up, push the branch before you stop:
-   > `git -C .work/<KEY>/<repo> push -u origin <branch>`
+   > This ticket lives only on this machine — the branch is local and `.work/<KEY>/` is never
+   > committed. If anyone else may need to pick it up, push the branch before you stop:
+   > `git -C <tree> push -u origin <branch>`
 
    Say it plainly. An unpushed local branch plus an absent dev is how one delivered ticket
    gets implemented twice.
@@ -241,11 +289,15 @@ Set `blocked:` in the sidecar, report, and stop — rather than working around i
 ticket is ambiguous in a way that changes what gets built; the ticket changed materially in
 Jira mid-flight; the ticket already carries a delivery comment or has moved past
 implementation; the base branch moved and the rebase conflicts; something the ticket needs is
-absent from the base; a requirement contradicts the codebase; or a worktree holds changes
-that are not this ticket's.
+absent from the base; a requirement contradicts the codebase; or the tree holds changes that
+are not this ticket's.
 
-Never touch `fk-admin-panel-be/`, `fk-admin-panel-fe/` or `fk-mobile/` themselves. The whole
-point of the worktrees is that the user's checkouts stay exactly as they left them.
+**Edit only inside the tree `ticket-worktree.sh tree` names, and only for the repos in scope.**
+In worktree mode that means never touching `fk-admin-panel-be/`, `fk-admin-panel-fe/` or
+`fk-mobile/` themselves — the point of the worktree is that the user's checkouts stay exactly
+as they left them. In-place the user has explicitly handed you one of those checkouts for one
+repo; the other two are still off limits, as is any file in that repo unrelated to this
+ticket. The gate has not moved: nothing is edited before the user approves the plan.
 
 ## 6. Report
 

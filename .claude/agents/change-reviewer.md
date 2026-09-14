@@ -39,15 +39,21 @@ sidecar path (optional), and an output mode. Nothing else. Form your own view.
 
 ## Sequence
 
-1. Establish the range in each worktree — the change is the branch against the base it was
-   cut from:
+1. Establish the range in each tree — the change is the branch against the base it was cut
+   from. Ask where the tree is rather than assembling the path: a ticket may run in an
+   isolated worktree or in-place in the repo's own checkout, and the meta file is under
+   `.work/<KEY>/` either way, never relative to the tree:
    ```bash
-   cd .work/<KEY>/<repo>
-   BASE=$(sed -n 's/^BASE_REF=//p' ../meta/<repo>.env)
-   git log --oneline "$BASE"..HEAD ; git diff --stat "$BASE"...HEAD ; git status --porcelain
+   TREE=$(.claude/hooks/ticket-worktree.sh tree <KEY> <repo>)
+   BASE=$(sed -n 's/^BASE_REF=//p' .work/<KEY>/meta/<repo>.env)
+   git -C "$TREE" log --oneline "$BASE"..HEAD
+   git -C "$TREE" diff --stat "$BASE"...HEAD
+   git -C "$TREE" status --porcelain
    ```
-   Uncommitted work in the worktree is part of the change — review it too, and say it is
-   uncommitted.
+   Uncommitted work in the tree is part of the change — review it too, and say it is
+   uncommitted. In-place the tree is the user's own checkout, so a change there may be
+   theirs rather than the ticket's: judge it against the ticket and flag anything unrelated
+   instead of assuming it is in scope.
 2. **Check the base is still current** before judging anything:
    `.claude/hooks/ticket-freshness.sh check <KEY>`. Reviewing against a base that moved
    reviews a diff that will not exist after merge — report `STALE BASE` rather than a

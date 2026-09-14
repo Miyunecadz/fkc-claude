@@ -26,19 +26,26 @@ Mechanism and API paths: [`BITBUCKET.md`](./BITBUCKET.md).
 
 ## 1. Where the change lives
 
-A ticket driven through `/implement-ticket` is **committed in its worktree**, not in the
-user's checkout:
+A ticket driven through `/implement-ticket` is **already committed on its branch** at
+Handover. Which checkout that branch is in depends on the mode the user chose at §2:
 
 ```
-.work/<KEY>/<repo>/          the worktree, branch already committed at Handover
-.work/<KEY>/meta/<repo>.env  BASE_REF / BASE_SHA / BRANCH — what it was cut from
+.work/<KEY>/meta/<repo>.env  MODE / BASE_REF / BASE_SHA / BRANCH — what it was cut from
 .work/<KEY>/work.md          the sidecar; its `state:` says how far it got
+.work/<KEY>/<repo>/          the worktree — worktree mode only; in-place the branch is in <repo>/
 ```
 
-So the push and the PR happen **from the worktree path**, and `git -C .work/<KEY>/<repo>`
-is how every command addresses it. A change in the user's own checkout is the exception,
-not the norm — `pr-preflight.sh --checkout <repo>` covers it, and nothing there is staged
-or committed without their explicit say-so at the gate.
+So ask where it is rather than assuming, once per repo, and address every command with
+`git -C "$tree"`:
+
+```bash
+tree=$(.claude/hooks/ticket-worktree.sh tree <KEY> <repo>)
+```
+
+In-place that path *is* the user's checkout, so `pr-preflight.sh --checkout <repo>` and the
+worktree path are no longer different situations — the same care applies to both: nothing is
+staged, committed or pushed without their explicit say-so at the gate, and a `git status`
+that shows changes outside this ticket is a reason to stop and ask, not to widen the commit.
 
 Never `cd` into a repo and run git relative; always `git -C <path>`.
 
