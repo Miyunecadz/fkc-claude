@@ -100,7 +100,30 @@ UI PRs here carry Bitbucket-hosted images:
 ```
 
 Those URLs are minted by uploading through the PR editor in the browser. **The API cannot
-create one and cannot attach a local file.** So: include an image only when the user
-supplies an already-uploaded Bitbucket URL; otherwise omit it entirely and tell them to
-attach it in the browser after the PR is open. Never invent an image URL, never point at a
-local path, never leave a placeholder.
+create one and cannot attach a local file** — Bitbucket Cloud has no pull request
+attachment endpoint, and the `bitbucket.org/repo/<id>/images/` host belongs to the editor.
+So: include an image only when the user supplies an already-uploaded Bitbucket URL;
+otherwise omit it entirely and tell them to attach it in the browser after the PR is open.
+Never invent an image URL, never point at a local path, never leave a placeholder.
+
+`pr-body.py` accepts a `Screenshot` section after `Check`, holding Bitbucket image links
+only ([`DESCRIPTION.md`](./DESCRIPTION.md)). Anything else is refused, so a broken image
+cannot be posted.
+
+**Taking the picture is automated; uploading it is not.** The image itself comes from the
+running app, not from a description of it:
+
+```bash
+# one-off on WSL, or the bundled chromium will not start: sudo apt install libasound2t64
+NODE_PATH=<repo-with-playwright>/node_modules \
+  node .claude/hooks/pr-endpoint-shot.js \
+  --endpoint http://localhost:<port>/graphql \
+  --spec .work/<KEY>/shots/spec.json \
+  --out  .work/<KEY>/shots \
+  --token-file <file holding a bearer token>
+```
+
+It shoots the GraphQL Playground the backend already serves, showing the query and its
+real response. It exits non-zero if an endpoint answered with `errors`, and aborts if the
+token is visible on screen. Shoot the **ticket's own code**, on its own port, so the
+picture is of the branch under review and not of whatever the user's checkout is running.

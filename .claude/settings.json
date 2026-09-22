@@ -45,6 +45,30 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 5,
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/plain-uk-english.sh\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 5,
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/uk-english-lint.py\"",
+            "statusMessage": "Checking UK English in prose"
+          }
+        ]
+      }
     ]
   },
   "permissions": {
@@ -83,5 +107,8 @@
   "attribution": {
     "commit": "",
     "pr": ""
+  },
+  "worktree": {
+    "bgIsolation": "none"
   }
 }

@@ -20,7 +20,8 @@ curious reviewer needs is already in the diff, the ticket and the commit.
 
 ## What you write — the semantic block
 
-Four labels, any order, headings or `Label:` prefixes, wrapped however you like:
+Four labels, any order, headings or `Label:` prefixes, wrapped however you like — plus
+`Screenshot`, which is optional and always comes last:
 
 ```text
 Ticket: https://zero-hero-tech.atlassian.net/browse/FKC-279
@@ -60,6 +61,15 @@ Anyone signed in who could reach the Configuration area could rename every futur
 4. Create a purchase order — its name and prefix are unchanged.
 ```
 
+A PR that changes what someone sees, or an endpoint someone calls, ends with one more
+section:
+
+```markdown
+**Screenshot**
+
+![](https://bitbucket.org/repo/bxjg5L4/images/2340471243-image.png){: data-layout='center' }
+```
+
 `··` is **two real spaces** — a Markdown hard break. This is not decoration, and none of
 it is negotiable:
 
@@ -85,6 +95,7 @@ reason it exists — the shape above was got wrong by hand on PR #125.
 | `What` | 1–2 sentences | What someone *using the app* now sees. Never a file, resolver, hook or component name |
 | `Why` | 1 sentence | The reason it was needed. Not a restatement of What |
 | `Check` | 2–6 steps | Things a reviewer can actually do in the running app |
+| `Screenshot` | 0–6 images | Optional, and always last. **Bitbucket-hosted images only**, one per line; the formatter centres them. A local path or an outside host is refused, because it renders as a broken image for every reviewer |
 
 **Budget: 120 words.** The formatter warns above it and refuses above 250 — over that,
 either the body is padded or the PR is too big. Say the PR is too big; do not squeeze the
@@ -106,6 +117,11 @@ meaning out to fit.
 - **A cross-repo pointer, a migration warning or a breaking-change line** goes as the last
   sentence of **Why** — one sentence, not a section of its own. ("Includes a dbmate
   migration — run `yarn db:migrate` after merge.")
+- **Show the change, do not describe the picture.** A screenshot needs no arrows, boxes or
+  captions; the diff says what moved. A frontend PR shows the page, a backend PR shows the
+  endpoint answering with real data. Never post a shot of a failing response, and never
+  post one with a bearer token on screen.
+- **Image URLs are not counted** against the word budget. Pictures are not padding.
 
 ## Banned — and what the script does about it
 

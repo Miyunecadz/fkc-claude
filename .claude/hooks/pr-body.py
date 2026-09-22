@@ -36,13 +36,16 @@ import re
 import sys
 
 # --- the contract ---------------------------------------------------------------------
-CANON = ("ticket", "what", "why", "check")
+CANON = ("ticket", "what", "why", "check")      # required, and in this order
+OPTIONAL = ("screenshot",)                      # allowed after Check, never required
+ORDER = CANON + OPTIONAL
 ALIASES = {
     "ticket": "ticket", "jira": "ticket", "issue": "ticket",
     "what": "what", "what changed": "what",
     "why": "why", "why now": "why",
     "check": "check", "checks": "check", "verification": "check",
     "verify": "check", "how to verify": "check",
+    "screenshot": "screenshot", "screenshots": "screenshot",
 }
 MAX_WORDS_HARD = 250       # over this the PR is too big, or the body is padded
 MAX_CHECKS = 12
@@ -81,6 +84,15 @@ URL_ONLY = re.compile(r"^https?://\S+$")
 MD_LINK = re.compile(r"^\[(?P<text>[^\]]*)\]\((?P<url>[^)\s]+)\)\s*(?:\{[^}]*\})?\s*$")
 # Bitbucket's own editor writes this; it is what makes a link render as a smart card
 INLINE_CARD = "{: data-inline-card='' }"
+# A screenshot is one Bitbucket-hosted image per line, centred. Bitbucket is the only
+# accepted host: a local path or an outside URL renders as a broken image for every
+# reviewer, so it is refused here rather than posted.
+IMAGE = re.compile(
+    r"^!\[[^\]]*\]\((?P<url>https://bitbucket\.org/[^\s)]+)\)"
+    r"[ \t]*(?:\{[^}]*\})?[ \t]*$"
+)
+IMAGE_LAYOUT = "{: data-layout='center' }"
+MAX_IMAGES = 6
 
 ATTRIBUTION = re.compile(
     r"(generated\s+(?:with|by)\s+\[?claude"
@@ -218,6 +230,33 @@ def check_items(lines):
     return [i for i in items if i]
 
 
+def image_items(lines):
+    """Lines -> (image urls, lines that are not images). Order is kept."""
+    urls, bad = [], []
+    for line in lines:
+        if not line.strip():
+            continue
+        m = IMAGE.match(line.strip())
+        if m:
+            urls.append(m.group("url"))
+        else:
+            bad.append(" ".join(line.split())[:60])
+    return urls, bad
+
+
+def prose_lines(lines):
+    """The body's prose half — everything above a Screenshot heading.
+
+    Image URLs are long and are not writing, so they are left out of the word and line
+    budgets. Counting them would report a padded body for a PR that simply has pictures.
+    """
+    for i, line in enumerate(lines):
+        head = heading(line)
+        if head and _canon(head[0]) == "screenshot":
+            return lines[:i]
+    return lines
+
+
 def ticket_value(raw, base_url=None):
     """The ticket line's value, in the form Bitbucket unfurls into a smart card.
 
@@ -247,6 +286,7 @@ def format_body(text, base_url=None):
     what = paragraph(sections.get("what", []))
     why = paragraph(sections.get("why", []))
     checks = check_items(sections.get("check", []))
+    shots, bad_shots = image_items(sections.get("screenshot", []))
 
     if "ticket" not in sections:
         problems.append("missing Ticket line (use `Ticket: none` when there is no ticket)")
@@ -266,6 +306,16 @@ def format_body(text, base_url=None):
         problems.append("Check section has no steps")
     elif len(checks) > MAX_CHECKS:
         problems.append("%d check steps — at most %d" % (len(checks), MAX_CHECKS))
+    if "screenshot" in sections:
+        if bad_shots:
+            problems.append(
+                "Screenshot takes Bitbucket image links only, one per line — not: %s"
+                % "; ".join(bad_shots)
+            )
+        elif not shots:
+            problems.append("Screenshot section is empty")
+        elif len(shots) > MAX_IMAGES:
+            problems.append("%d images — at most %d" % (len(shots), MAX_IMAGES))
     if problems:
         raise Invalid(problems)
 
@@ -282,6 +332,10 @@ def format_body(text, base_url=None):
         ticket, HARD_BREAK, what, HARD_BREAK, why,
         "\n".join("%d. %s" % (n, c) for n, c in enumerate(checks, 1)),
     )
+    if shots:
+        body += "\n**Screenshot**\n\n%s\n" % "\n".join(
+            "![](%s)%s" % (url, IMAGE_LAYOUT) for url in shots
+        )
     body = re.sub(r"\n{3,}", "\n\n", body)
 
     notes = ["dropped section: %s" % d for d in dropped]
@@ -320,8 +374,9 @@ def validate(body):
     missing = [s for s in CANON if s not in seen]
     for s in missing:
         problems.append("missing %s section" % s.capitalize())
-    if not missing and order != list(CANON):
-        problems.append("sections out of order: %s — required Ticket, What, Why, Check"
+    if not missing and order != [s for s in ORDER if s in seen]:
+        problems.append("sections out of order: %s — required Ticket, What, Why, Check, "
+                        "then Screenshot if there is one"
                         % ", ".join(o.capitalize() for o in order))
 
     def content(name, stop):
@@ -333,7 +388,7 @@ def validate(body):
         return ([first] if first else []) + rest
 
     if "ticket" in seen:
-        value = " ".join(content("ticket", ("what", "why", "check")))
+        value = " ".join(content("ticket", ("what", "why", "check", "screenshot")))
         if not value:
             problems.append("Ticket line is empty")
         if lines[seen["ticket"]] != "Ticket: " + value:
@@ -343,7 +398,7 @@ def validate(body):
     if "why" in seen and not content("why", ("check",)):
         problems.append("Why section is empty")
     if "check" in seen:
-        raw = content("check", ())
+        raw = content("check", ("screenshot",))
         numbered = [l for l in raw if re.match(r"^\d+\.[ \t]+\S", l)]
         if not numbered:
             problems.append("Check section has no numbered steps")
@@ -353,8 +408,19 @@ def validate(body):
             problems.append("Check steps must be numbered 1..n in order")
         elif len(numbered) > MAX_CHECKS:
             problems.append("%d check steps — at most %d" % (len(numbered), MAX_CHECKS))
+    if "screenshot" in seen:
+        urls, bad = image_items(content("screenshot", ()))
+        if bad:
+            problems.append(
+                "Screenshot takes Bitbucket image links only, one per line — not: %s"
+                % "; ".join(bad)
+            )
+        elif not urls:
+            problems.append("Screenshot section is empty")
+        elif len(urls) > MAX_IMAGES:
+            problems.append("%d images — at most %d" % (len(urls), MAX_IMAGES))
 
-    words = len(body.split())
+    words = len(" ".join(prose_lines(lines)).split())
     if words > MAX_WORDS_HARD:
         problems.append("%d words — over the %d limit; the PR is too big, or the body is padded"
                         % (words, MAX_WORDS_HARD))
@@ -376,7 +442,8 @@ def validate(body):
 
 def warnings(body):
     out = []
-    words, lines = len(body.split()), len(body.strip().split("\n"))
+    prose = prose_lines(body.replace("\r\n", "\n").strip().split("\n"))
+    words, lines = len(" ".join(prose).split()), len(prose)
     if words > WARN_WORDS:
         out.append("%d words (budget %d) — consider cutting" % (words, WARN_WORDS))
     if lines > WARN_LINES:

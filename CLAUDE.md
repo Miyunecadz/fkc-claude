@@ -33,6 +33,17 @@ Full map and cross-repo relationships: **[docs/repo-map.md](docs/repo-map.md)**
   rebuilds it first if the code moved under it (uncommitted edits included, ~3s), and prints
   which map answered. Choosing by hand is how an answer arrives about a branch you are not on.
 
+## Writing style (enforced)
+
+Everything a human reads — chat replies, Jira tickets, PR titles and descriptions,
+commit messages, code comments, docs — is **British English, plain words, short
+sentences, answer first**. Code identifiers, API fields, DB columns and quoted error
+text keep their original spelling.
+
+Rules: **[.claude/skills/plain-uk-english/SKILL.md](.claude/skills/plain-uk-english/SKILL.md)**.
+Two hooks hold the line: the rule is injected on every prompt, and prose written to
+`.md`/`.txt` is scanned for American spelling and banned jargon.
+
 ## Enforcement
 
 Guardrails (if enabled via `/lodestar-guardrails`) are **enforced**, not advisory — e.g. applied database migrations cannot be edited; secrets cannot be read. Follow the redirect a blocked action gives you.

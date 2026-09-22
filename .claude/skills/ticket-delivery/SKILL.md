@@ -115,7 +115,8 @@ Strictly ordered — each stage consumes the previous one's output.
 The pipeline is split across **two commands**, with a human pause between them:
 
 ```
-/implement-ticket   Locate → Prepare → Analyse → Plan → [approve] → Implement    ends IMPLEMENTED
+/implement-ticket   Locate (+images) → Prepare → Analyse → Plan → [approve] → Implement
+                                                                         ends IMPLEMENTED
       ── the dev reads the diff, and normally tweaks it by hand ──
 /implement-review   Validate → Review → Handover (commit)                        ends HANDED_OVER
 /create-pr          push → PR → the ticket's delivery comment                    ends PR_OPEN
@@ -123,9 +124,10 @@ The pipeline is split across **two commands**, with a human pause between them:
 
 | Stage | Command | Who does it | Produces | State after | Gate before moving on |
 |---|---|---|---|---|---|
-| Locate | implement | main thread | the Jira issue read once, fingerprint recorded, repos in scope | `NEW` | issue exists, carries no delivery comment, has not moved past implementation, and names its affected systems |
+| Locate | implement | main thread | the Jira issue read once (`fields="*all"`, `include="comments"`), fingerprint recorded, repos in scope | `NEW` | issue exists, carries no delivery comment, has not moved past implementation, and names its affected systems |
+| Evidence | implement | main thread + `screenshot-requirement-analysis` | the ticket's images read **once**, inventoried as rows in `## Evidence`; non-image attachments recorded as a manifest and **not** downloaded | `NEW` | every attached image has been inventoried, or the ticket has none. A contradiction between an image and the ticket text, or an illegible region that would change the build, is a §5 stop |
 | Prepare | implement | `ticket-worktree.sh` + `ticket-freshness.sh graph` | a worktree per repo, cut from the **fetched** base; a graph built from that worktree | — | every repo in scope has a worktree and a graph whose `GRAPH_SHA` is its HEAD |
-| Analyse | implement | `ticket-analyst`, one per repo, **parallel** | requirement interpretation, affected files as `path:line`, unknowns, risks | `ANALYSED` | no material unknown; nothing the ticket needs is missing from the base |
+| Analyse | implement | `ticket-analyst`, one per repo, **parallel** | requirement interpretation, affected files as `path:line`, unknowns, risks, image-row-vs-code conflicts | `ANALYSED` | no material unknown; nothing the ticket needs is missing from the base; every image row for that repo's surface is either satisfied by the plan or raised as a `CONFLICT` |
 | Plan | implement | main thread | files to touch per repo, pattern to follow, cross-repo order, the contract if one changes, validation commands, out of scope | `PLANNED` | — |
 | **Approval** | implement | the user | the decision, recorded verbatim | `APPROVED` | **the user approves.** Nothing under any worktree is edited before this. A presented plan is not an approved one |
 | Implement | implement | `ticket-implementer`, one per repo | the change, scoped to the plan | `IMPLEMENTING` → `IMPLEMENTED` | plan followed, or the deviation recorded in `## Implement` |
