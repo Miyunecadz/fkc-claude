@@ -14,8 +14,8 @@
       "architecture": "graphify",
       "docs": "docs/fk-admin-panel-be/",
       "mapping": {
-        "lastMappedSha": "f5f0ba1fb118b51b99d3322fcddaf3ab07fbaf98",
-        "lastMappedAt": "2026-09-10T13:10:00Z",
+        "lastMappedSha": "86b0dd442d72e4ecb73bc05c17f1be6dff82e8a4",
+        "lastMappedAt": "2026-09-16T03:20:46Z",
         "build": "full",
         "extractFlags": [
           "--force",
@@ -56,8 +56,8 @@
       "architecture": "graphify",
       "docs": "docs/fk-admin-panel-fe/",
       "mapping": {
-        "lastMappedSha": "fab39f20d32580187d2257cdf0e7c7000a63ec0c",
-        "lastMappedAt": "2026-09-10T13:10:05Z",
+        "lastMappedSha": "7eeec84f1df7f57e5b4badc5e05663398765cee1",
+        "lastMappedAt": "2026-09-21T09:09:51Z",
         "build": "full",
         "extractFlags": [
           "--force",
