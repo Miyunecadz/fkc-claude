@@ -1,7 +1,7 @@
 ---
 description: Drive a Jira ticket (FKC) through analysis, planning and implementation — in an isolated git worktree per repo, stopping at IMPLEMENTED so a human can read the code before anything is validated, reviewed or committed
 argument-hint: <FKC-123 | ticket key or summary substring> (omit to list ticket workspaces in flight)
-allowed-tools: Task, SendMessage, Bash, Read, AskUserQuestion, Skill, mcp__jira__jira_get_issue, mcp__jira__jira_search
+allowed-tools: Task, SendMessage, Bash, Read, AskUserQuestion, Skill, mcp__jira__jira_get_issue, mcp__jira__jira_search, mcp__jira__jira_get_issue_images
 effort: high   # multi-stage delivery with an approval gate
 ---
 
@@ -41,6 +41,12 @@ failure this command is designed around:
 | `cat > file`, `cat >> file`, `python3 - <<EOF` that edits code | `ticket-implementer` |
 | `yarn build`, `yarn lint`, `yarn test`, `node --check` | `ticket-validator`, in `/implement-review` |
 | `git diff` to read a change (diffstat is fine) | `change-reviewer`, in `/implement-review` |
+| `mcp__jira__jira_download_attachments` — it returns the file **base64-encoded into your context** | `ticket-analyst` |
+
+`jira_get_issue_images` is the one exception, and you have it: it returns images as inline
+vision content, not as a base64 blob, and it is read **once per ticket** (§1a). Attachment
+*bytes* are a different matter — a 2 MB PDF arrives as ~2.7 MB of base64 text that never
+leaves your context again. The analyst pulls those, in its own disposable context.
 
 The sidecar is written through the hook, never with a heredoc:
 
@@ -83,8 +89,19 @@ stop.
 
 With an argument: resolve it to one issue key. A bare key goes straight to
 `mcp__jira__jira_get_issue`; anything else is `mcp__jira__jira_search` first — more than one
-match, ask; none, say so and stop. **Read the issue once, in full**, and record the freshness
-fingerprint (`ticket-delivery` → `FRESHNESS.md` §1).
+match, ask; none, say so and stop. **Read the issue once, in full** — in full means
+everything the requirement could be hiding in, which the tool's defaults do not give you:
+
+```
+mcp__jira__jira_get_issue  issue_key=<KEY>  fields="*all"  use_display_names=true  include="comments"
+```
+
+`fields` defaults to a short essential set with **no `attachment` and no custom fields**, so
+acceptance criteria living in a custom field and the attachment manifest are both absent
+unless you ask; `comments` are not inlined unless `include` says so, and the delivery-comment
+check below has nothing to read without them. Record the freshness fingerprint
+(`ticket-delivery` → `FRESHNESS.md` §1). The freshness **re-checks** later in the run compare
+the requirement fields only — they do not need the attachments again.
 
 Two things in that issue end the run before any work starts, because each means someone else
 may already have delivered this ticket from another machine — `.work/` is local and never
@@ -100,6 +117,41 @@ travels:
 Report what exists and stop. Starting a second implementation of a delivered ticket is the
 failure this check exists for. `FRESHNESS.md` §1 also has you look for a branch already
 carrying the key — that check stays, and catches the case where the PR was opened by hand.
+
+### 1a. Read the attachments — images are requirement, not decoration
+
+`fields.attachment` is now in front of you. Short ticket text plus a screenshot is the normal
+shape of a ticket here, not an edge case: a PO who pastes the screen and writes "make it like
+this" has put the entire requirement in the image, and an implementation that never opened it
+is building from the half of the ticket that happened to be typed.
+
+**Images** — if the manifest holds any (`png`, `jpe?g`, `gif`, `webp`, `svg`, `bmp`):
+
+```
+mcp__jira__jira_get_issue_images  issue_key=<KEY>
+```
+
+Call it **once per ticket**, then load `screenshot-requirement-analysis` and produce its
+inventory — one row per readable element, relevance marked rather than silently filtered,
+labels copied verbatim, annotations treated as explicit intent. Those rows are what travels
+to the analysts (§3). The images themselves do not: they are read here and never again, which
+is the whole reason this is one call in one place rather than one per repo.
+
+Two rows from that skill outrank the rest and you carry them forward word for word:
+
+- a **contradiction** between the image and the ticket text (text says "all suppliers", the
+  screenshot shows a filter) — report both as they are, do not reconcile them yourself;
+- an **illegible or cropped region that would change what gets built** — that is a §5 stop
+  condition, not a detail to guess past.
+
+**Non-image attachments** (`.csv`, `.sql`, `.pdf`, `.json`, `.log`, `.xlsx`) — record the
+manifest only: filename, mime type, size. **Do not download them here.** Pass the manifest to
+the analysts; the one whose slice actually needs a file pulls it itself (§3), and the base64
+lands in a context that is thrown away rather than in yours for the rest of the ticket.
+
+Scope reads off this too — a mobile frame in a screenshot is scope evidence as good as the
+ticket naming iOS, and a screenshot of a screen no repo in scope owns means the scope is
+wrong.
 
 Then decide scope from the ticket's own words — affected systems map to repos:
 Web → `fk-admin-panel-fe`, Backend/DB → `fk-admin-panel-be`, iOS/Android → `fk-mobile`.
@@ -200,6 +252,25 @@ Create the sidecar now — through the hook, not by hand:
 Record the mode in `repos=`. A resumed run reads it from the meta file, but a human reading
 the sidecar needs to know whether the code is in their checkout or under `.work/`.
 
+Then write §1a's findings down, before any agent is dispatched:
+
+```bash
+.claude/hooks/ticket-worktree.sh sidecar append <KEY> Evidence NEW <<'EOF'
+IMAGES (<n> attached, read once at Locate)
+- Image 1 — <screen/page>: <the inventory rows that bear on the build>
+- CONTRADICTION: <image> vs <ticket text> — <both, as they are>
+
+ATTACHMENTS (not downloaded — manifest only)
+- <filename> (<mime>, <size>) — <what it looks like it is for>
+
+NONE — the ticket carries no attachments
+EOF
+```
+
+This is the section that makes the images survive. Your context is compacted; the sidecar is
+not. A resumed run, a second fix round and `/implement-review` all read the image evidence
+from here, and none of them can call `jira_get_issue_images` — it is on this command only.
+
 ## 3. Run the stages
 
 Analyse → Plan → **Approval** → Implement, each gated as the skill specifies, each written to
@@ -239,10 +310,15 @@ already established. Every dispatch carries **all** of this, and nothing else:
 1. the ticket key and the requirement text **for that repo's slice**, quoted from Jira — not
    summarised, not paraphrased;
 2. its worktree path, its base `ref@sha`, and its graph path;
-3. **the findings the earlier stages already paid for**, copied from the sidecar: the
+3. **the image evidence rows for the surface that repo owns**, copied verbatim from the
+   sidecar's `## Evidence`, plus the attachment manifest — send an analyst the rows for the
+   screen it builds, not the whole inventory, and never re-read the images to do it. Say
+   plainly that a row is what a screenshot showed, so a contradiction with the code comes
+   back as a finding instead of being silently resolved in the agent's favour;
+4. **the findings the earlier stages already paid for**, copied from the sidecar: the
    analyst's `FILES TO CHANGE`, `PATTERN / REUSE` and `RISKS` rows go to the implementer;
-4. its slice of the approved plan, verbatim;
-5. any decision the user made at a gate, in the user's own words.
+5. its slice of the approved plan, verbatim;
+6. any decision the user made at a gate, in the user's own words.
 
 Never paste the codebase into a prompt, and never read source files yourself. A cited
 `path:line` is what travels between stages — the agent at the other end opens the file.
