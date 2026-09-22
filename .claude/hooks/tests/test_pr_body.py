@@ -451,5 +451,78 @@ class Hook(unittest.TestCase):
                                                    "body": {"draft": False}}}))
 
 
+IMG_A = "https://bitbucket.org/repo/bxjg5L4/images/2340471243-image.png"
+IMG_B = "https://bitbucket.org/lisafk/fk-admin-panel-be/downloads/endpoint.png"
+
+
+def _semantic(screenshot=""):
+    return (
+        "Ticket: none\n\n"
+        "What: The packages list reads Subcontractor Packages.\n\n"
+        "Why: The business calls these packages, not orders.\n\n"
+        "Check:\n- Open the list.\n- The totals are unchanged.\n"
+        + screenshot
+    )
+
+
+class Screenshots(unittest.TestCase):
+    """An optional Screenshot section, after Check, holding Bitbucket images only."""
+
+    def test_format_emits_the_section_rather_than_swallowing_it(self):
+        body, _ = pb.format_body(_semantic("\nScreenshot:\n![](%s)\n" % IMG_A))
+        self.assertIn("**Screenshot**\n\n![](%s){: data-layout='center' }" % IMG_A, body)
+        self.assertNotIn("3. Screenshot", body)      # the old failure: a numbered step
+
+    def test_format_normalises_the_layout_attribute(self):
+        body, _ = pb.format_body(_semantic("\nScreenshot:\n![](%s){: data-layout='left' }\n" % IMG_A))
+        self.assertIn("![](%s){: data-layout='center' }" % IMG_A, body)
+
+    def test_several_images_keep_their_order(self):
+        body, _ = pb.format_body(_semantic("\nScreenshot:\n![](%s)\n![](%s)\n" % (IMG_B, IMG_A)))
+        self.assertLess(body.index(IMG_B), body.index(IMG_A))
+
+    def test_a_local_path_is_refused(self):
+        with self.assertRaises(pb.Invalid) as e:
+            pb.format_body(_semantic("\nScreenshot:\n![](.work/FKC-1/shots/a.png)\n"))
+        self.assertIn("Bitbucket image links only", "; ".join(e.exception.problems))
+
+    def test_an_outside_host_is_refused(self):
+        with self.assertRaises(pb.Invalid) as e:
+            pb.format_body(_semantic("\nScreenshot:\n![](https://imgur.com/a.png)\n"))
+        self.assertIn("Bitbucket image links only", "; ".join(e.exception.problems))
+
+    def test_an_empty_section_is_refused(self):
+        with self.assertRaises(pb.Invalid) as e:
+            pb.format_body(_semantic("\nScreenshot:\n"))
+        self.assertIn("Screenshot section is empty", "; ".join(e.exception.problems))
+
+    def test_too_many_images_are_refused(self):
+        shots = "\nScreenshot:\n" + "".join("![](%s?%d)\n" % (IMG_A, i) for i in range(pb.MAX_IMAGES + 1))
+        with self.assertRaises(pb.Invalid) as e:
+            pb.format_body(_semantic(shots))
+        self.assertIn("images — at most", "; ".join(e.exception.problems))
+
+    def test_a_formatted_body_with_images_validates(self):
+        body, _ = pb.format_body(_semantic("\nScreenshot:\n![](%s)\n" % IMG_A))
+        self.assertEqual(pb.validate(body), [])
+
+    def test_the_section_must_come_after_check(self):
+        body, _ = pb.format_body(_semantic("\nScreenshot:\n![](%s)\n" % IMG_A))
+        lines = body.rstrip().split("\n")
+        moved = lines[:1] + ["", "**Screenshot**", "", lines[-1]] + lines[1:-1]
+        problems = pb.validate("\n".join(moved) + "\n")
+        self.assertTrue(any("out of order" in p for p in problems), problems)
+
+    def test_image_urls_are_not_counted_against_the_word_budget(self):
+        plain, _ = pb.format_body(_semantic())
+        shot, _ = pb.format_body(_semantic("\nScreenshot:\n![](%s)\n![](%s)\n" % (IMG_A, IMG_B)))
+        self.assertEqual(pb.warnings(plain), pb.warnings(shot))
+
+    def test_the_section_is_still_optional(self):
+        body, _ = pb.format_body(_semantic())
+        self.assertNotIn("Screenshot", body)
+        self.assertEqual(pb.validate(body), [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
