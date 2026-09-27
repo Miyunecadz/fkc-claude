@@ -1,62 +1,69 @@
 # Validation — what actually exists here
 
-There is effectively **no automated test coverage** in this workspace, and CI runs neither
-lint nor tests: the pipelines run a deploy step, and the husky `pre-commit` hooks in the
-clients do not run a suite. So validation is a small number of real commands plus honest
-manual verification — and the failure mode to guard against is reporting a check that never
-ran.
+There is almost no automated test coverage in this workspace. CI runs a deploy step, not
+lint or tests, and the clients' husky hooks run no suite. So validation is a few real
+commands plus named manual checks. The failure to guard against is reporting a check that
+never ran.
 
-Run everything **from the ticket's worktree**, never from the user's checkout.
+Run everything from the ticket's tree (`ticket-worktree.sh tree <KEY> <repo>`).
 
-| Repo | Real checks | Do not rely on |
+| Repo | Real checks | Not a check |
 |---|---|---|
-| `fk-admin-panel-be` | `node --check <changed file>` for every changed JS file; boot it (`yarn start`, or the `docker-compose.deps.yml` stack for mariadb+redis) — invalid SDL fails `mergeTypeDefs` and a bad permission name fails `assertValidPermission` at startup; `yarn db:status` after a migration | `yarn test` is `echo "Error: no test specified" && exit 1`. There is no ESLint or Prettier config in this repo at all — match the surrounding file |
-| `fk-admin-panel-fe` | `yarn lint` (`eslint src`); `yarn build` (craco) | `yarn test` — `src/` holds a single test file; passing it proves nothing about a change elsewhere. `test:chrome`/`firefox`/`safari` are a `page.pause()` harness with no `playwright.config.*` — they open a browser and stop |
-| `fk-mobile` | none runnable from a worktree | `yarn lint` and `yarn test` both need `node_modules`, which this repo does not have. Say so; do not promise the check and do not start a React Native install unprompted |
+| `fk-admin-panel-be` | `node --check <file>` for every changed JS file; the boot below when typedefs or permissions changed; `yarn db:status` after a migration | `yarn test` is `echo "Error: no test specified" && exit 1`. There is no ESLint or Prettier config |
+| `fk-admin-panel-fe` | `yarn lint` (`eslint src`); `yarn build` (craco) | `yarn test` — one test file in `src/`, proves nothing about a change elsewhere. `test:chrome`/`firefox`/`safari` open a browser and pause |
+| `fk-mobile` | none runnable: no `node_modules` | `yarn lint` and `yarn test` need an install. Never start one |
 
-Preconditions to confirm before promising a check:
+## Backend boot
 
-- `fk-admin-panel-be` and `fk-admin-panel-fe` have `node_modules` in the main checkout, and
-  the worktree links to it — so their checks run. `fk-mobile` does not.
-- Never fall back to `npx eslint` in an uninstalled repo: it fetches ESLint 9, which rejects
-  these `.eslintrc.js` files with a flat-config migration error. That failure says nothing
-  about the code.
-- Never run an install inside a worktree (`WORKTREE.md` §3).
-
-## After a build check — drop what it left behind
-
-`yarn build` in `fk-admin-panel-fe` writes ~47M of craco output into the worktree, and
-nothing used to remove it: it was the single largest thing a finished ticket workspace
-held, long after anyone cared about it. Once the build's result is read and recorded,
-the directory has done its job:
+`yarn start` runs nodemon and never exits, and the server needs MariaDB and Redis from the
+checkout's `.env`. Bound it and read the log:
 
 ```bash
-.claude/hooks/ticket-worktree.sh clean <KEY> [repo]
+(cd "$tree" && timeout -k 5 60 yarn start >> "$log" 2>&1); echo "exit=$?"
+grep -m1 -E 'Graphql is ready on port|Invalid permission|Error' "$log"
 ```
 
-It deletes only untracked `build`/`dist`/`.next`/`coverage`, never anything git tracks, and
-never source. Record the build's **result** first — the log line is the evidence, and a
-cleaned directory is not a check that did not run.
+| Log shows | Record |
+|---|---|
+| `Graphql is ready on port` | `BOOT OK` — typedefs merged and permissions passed `assertValidPermission` |
+| `Invalid permission "<name>"`, or a GraphQL schema error | `BOOT FAILED` with that line |
+| a database or Redis connection error, a port already in use, or neither line within 60s | `BOOT UNCHECKED` — the check could not run; say why |
+
+Never record `BOOT OK` without the ready line.
+
+## Verdicts and states
+
+| Validator verdict | Means | Sidecar state |
+|---|---|---|
+| `VERIFIED` | at least one applicable check ran, and every applicable check passed | `VERIFIED` |
+| `FAILED_VERIFICATION` | a check ran and failed on the code | `FAILED_VERIFICATION` |
+| `INCONCLUSIVE` | no applicable check could run, or those that ran cannot speak to the change | `UNVERIFIED` |
+
+Across repos the worst wins: any failure is `FAILED_VERIFICATION`; else any inconclusive is
+`UNVERIFIED`; else `VERIFIED`. **Zero checks run is never `VERIFIED`.** An `fk-mobile`-only
+ticket is always `UNVERIFIED`. The human sees `UNVERIFIED — no automated check covered this
+change` plus the manual list, and review still runs.
 
 ## Recording
 
-Full output goes to `.work/<KEY>/validate/<repo>.log`; the sidecar and the report get the
-decisive lines only. Prepared and observed are recorded as two distinct things, because
-this is exactly where an unrun check gets reported as a passing one:
+Full output goes to `.work/<KEY>/validate/<repo>.log` by absolute path. The sidecar gets
+decisive lines only, with prepared and observed kept apart:
 
 ```markdown
-## Validate — <YYYY-MM-DD>
-prepared: <the checks this change requires, per repo>
+prepared: <the checks this change needs, per repo>
 observed:
-- fk-admin-panel-fe: yarn lint → "✖ 0 problems"        (.work/<KEY>/validate/fk-admin-panel-fe.log)
-- fk-admin-panel-be: node --check src/resolvers/x.js → exit 0
-not run: fk-mobile yarn lint — repo has no node_modules; it would have caught lint errors in the changed screen
-manual:  <what a human must exercise, named specifically>
+- fk-admin-panel-fe: yarn lint → exit 0, "Done in 41.2s"
+- fk-admin-panel-be: node --check src/resolvers/x.js → exit 0; boot → BOOT UNCHECKED (redis refused)
+not run: fk-mobile yarn lint — no node_modules; it would have caught lint errors in the screen
+manual:  <what a human must exercise, named: screen, mutation, role>
+verdict: VERIFIED | UNVERIFIED | FAILED_VERIFICATION
 ```
 
-Beyond that, verification is manual: exercise the change in the running UI or the GraphQL
-playground (`http://localhost:4000/graphql`) and state exactly what was exercised.
+After a `yarn build`, record the result, then `ticket-worktree.sh clean <KEY> <repo>` drops
+the ~47M of output.
 
-Three rules with no exceptions: never report a check as passing unless it ran and passed;
-never let a tooling failure pass as a code result; never invent a command that is not in
-that repo's `package.json`.
+Rules: never report a check as passing unless it ran and passed; never let a tooling failure
+pass as a code result; never run `npx eslint` in an uninstalled repo (it fetches ESLint 9,
+which rejects these configs); never invent a command that is not in the repo's
+`package.json`. Manual checks go through the running UI or the GraphQL playground at
+`http://localhost:4000/graphql`.

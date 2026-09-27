@@ -4,8 +4,9 @@
 # Why a script: "which worktree, which branch, what was it cut from, is it pushed, has the
 # remote moved, what would the PR contain, is anything sensitive in it" is git plumbing.
 # Getting it wrong is how a workflow pushes over someone else's commits or opens a PR
-# against the wrong branch. It prints state and the exact follow-up commands; it never
-# commits, never pushes, never writes anything, and never prints a diff.
+# against the wrong branch. It prints state and the exact follow-up commands. It never
+# commits, never pushes, never touches the working tree and never prints a diff; the only
+# thing it changes is remote-tracking refs, through `git fetch`.
 #
 #   pr-preflight.sh <KEY> [repo]              a ticket's worktrees (.work/<KEY>/<repo>/)
 #   pr-preflight.sh --checkout <repo> [dest]  the user's own checkout, no ticket
@@ -44,17 +45,27 @@ inspect() {
   echo "branch: $branch @ $head"
 
   [ "$branch" = "HEAD" ] && halt "detached HEAD — no branch to push."
-  { [ -d "$d/.git/rebase-merge" ] || [ -d "$d/.git/rebase-apply" ]; } && halt "a rebase is in progress — finish or abort it first."
-  [ -f "$d/.git/MERGE_HEAD" ] && halt "a merge is in progress — resolve and commit it first."
+  # In a worktree .git is a file, so ask git where its state lives rather than guess.
+  gp() { local p; p=$("${g[@]}" rev-parse --git-path "$1" 2>/dev/null) || return 1
+         case "$p" in /*) echo "$p" ;; *) echo "$d/$p" ;; esac; }
+  { [ -d "$(gp rebase-merge)" ] || [ -d "$(gp rebase-apply)" ]; } && halt "a rebase is in progress — finish or abort it first."
+  [ -f "$(gp MERGE_HEAD)" ] && halt "a merge is in progress — resolve and commit it first."
   case "$branch" in
     master|staging|development) halt "$branch is a shared branch. A PR must come from a work branch." ;;
   esac
 
   # ---- destination -------------------------------------------------------------------
+  # Fetch first: every range below is computed against origin/<dest>, and a stale ref
+  # makes the PR look bigger or smaller than it is.
+  local c
+  for c in ${dest:-staging master}; do
+    "${g[@]}" fetch --quiet origin "$c" 2>/dev/null ||
+      echo "  note: could not fetch origin/$c — ranges below use the last fetched copy."
+  done
   if [ -z "$dest" ]; then
     echo "destination: UNKNOWN — none recorded and none given"
     echo "  provable candidates (branch descends from these):"
-    local any=0 c
+    local any=0
     for c in staging master; do
       if "${g[@]}" rev-parse --verify --quiet "origin/$c" >/dev/null &&
          "${g[@]}" merge-base --is-ancestor "origin/$c" HEAD 2>/dev/null; then
@@ -96,8 +107,7 @@ inspect() {
     echo "changed files vs origin/$dest:"
     "${g[@]}" diff --name-only "$range" | sed 's/^/  /'
     nfiles=$("${g[@]}" diff --name-only "$range" | grep -c . || true)
-    echo "read the diff once, in full, before staging anything:"
-    echo "  git -C $d diff $range"
+    echo "diff range (for pr-author): $range"
   fi
 
   # ---- sensitive material --------------------------------------------------------------

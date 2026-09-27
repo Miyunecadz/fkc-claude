@@ -1,53 +1,43 @@
 # fk-connect — Workspace Router
 
-This folder is a **Lodestar workspace**: several independent repositories coordinated from one root. This file is a *router*, not a knowledge base — it stays intentionally small. Real knowledge lives in skills and docs that load on demand.
+A Lodestar workspace: three independent repos coordinated from one root. This file routes; skills hold the detail and load on demand.
 
 ## Repositories
 
-<!-- One line per repo. Filled in by /lodestar-init and /lodestar-onboard. -->
+- **fk-admin-panel-be** — GraphQL API, DB and auth owner (Node/Express, Apollo Server, MariaDB via dbmate, Redis/Bull, cron).
+- **fk-admin-panel-fe** — Admin web client (React 18 on CRACO, Apollo Client, ag-grid, Tailwind).
+- **fk-mobile** — Mobile app (React Native, Apollo Client, NativeWind, Firebase messaging).
 
-- **fk-admin-panel-be** — GraphQL API, DB & auth owner (Node/Express/Apollo Server, MariaDB via dbmate, Redis/Bull). See docs/fk-admin-panel-be/.
-- **fk-admin-panel-fe** — Admin web client (React + craco, Apollo Client, Tailwind). See docs/fk-admin-panel-fe/.
-- **fk-mobile** — Mobile app (React Native, Apollo Client, Firebase messaging). See docs/fk-mobile/.
+The root is its own git repo that ignores the three repos. Always run git as `git -C <repo> …`.
 
-_All three repos are onboarded — each has `docs/<repo>/conventions.md` and a queryable `docs/<repo>/architecture/graph.json`._
+## Cross-repo contract
 
-Full map and cross-repo relationships: **[docs/repo-map.md](docs/repo-map.md)**
+Start at `docs/repo-map.md`. The contract doc is `docs/_shared/api-contract.md`; each repo has
+`docs/<repo>/conventions.md`. Docs may lag the code. When they disagree, the code wins:
 
-## Loading policy (do not remove — this keeps the router thin)
+- Schema: `fk-admin-panel-be/src/typedefs/*.typedef.js`, resolvers in `src/resolvers/`, permissions in `src/configs/shield.js` and `src/utils/permissions/`.
+- Client operations: `fk-admin-panel-fe/src/graphql/` and `fk-mobile/src/graphql/`.
 
-- **Do not read docs eagerly.** Skills declare *when* they apply via their `description`. Trust those triggers; load a skill only when the current task matches.
-- **Stay in the relevant repo.** For a task in one repo, do not load another repo's docs or skills.
-- **Match the layer to the task.** Planning a feature → the planning skill (not coding standards). Writing code → the relevant stack skill (not the planning playbook).
-- **Cross-repo truth lives in `docs/_shared/`.** The API contract there is the spine that links the repos; consult it for anything spanning repo boundaries.
-- **Architecture graphs are queryable — reach for them before re-reading source.** Always
-  through the resolver, never by passing `--graph` yourself:
+## Loading policy
+
+- Load a skill only when the task matches its description. Do not read ahead.
+- Stay in the repo the task is in.
+- Planning → planning skills. Writing code → the repo's standards skill.
+- Architecture maps: query through the resolver, never with `--graph` by hand. Each repo and each ticket worktree under `.work/` has its own map on its own commit; `graph.sh` picks the right one and rebuilds it if the code moved.
 
   ```bash
-  .claude/hooks/graph.sh status                       # every map here, and whether it is current
-  .claude/hooks/graph.sh query <path> "<question>"    # <path> = any repo, worktree, or file in one
+  .claude/hooks/graph.sh status
+  .claude/hooks/graph.sh query <repo-worktree-or-file> "<question>"
   ```
 
-  This workspace holds one map per repo **plus one per ticket worktree** under `.work/`, and
-  they describe different commits. `graph.sh` picks the map that describes the path you name,
-  rebuilds it first if the code moved under it (uncommitted edits included, ~3s), and prints
-  which map answered. Choosing by hand is how an answer arrives about a branch you are not on.
+## Writing style
 
-## Writing style (enforced)
-
-Everything a human reads — chat replies, Jira tickets, PR titles and descriptions,
-commit messages, code comments, docs — is **British English, plain words, short
-sentences, answer first**. Code identifiers, API fields, DB columns and quoted error
-text keep their original spelling.
-
-Rules: **[.claude/skills/plain-uk-english/SKILL.md](.claude/skills/plain-uk-english/SKILL.md)**.
-Two hooks hold the line: the rule is injected on every prompt, and prose written to
-`.md`/`.txt` is scanned for American spelling and banned jargon.
+British English, plain words, short sentences, answer first. Rules: `.claude/skills/plain-uk-english/SKILL.md`.
 
 ## Enforcement
 
-Guardrails (if enabled via `/lodestar-guardrails`) are **enforced**, not advisory — e.g. applied database migrations cannot be edited; secrets cannot be read. Follow the redirect a blocked action gives you.
+Guardrails in `.claude/guardrails/` are enforced, not advisory. They block commits to a default branch, destructive commands, edits to secret and `.env` files, hand edits to `db/schema.sql` and applied dbmate migrations. Follow the redirect a blocked action gives you.
 
 ## Onboarding a new repo
 
-Run `/lodestar-onboard ./<new-repo>`. It detects the stack, generates the architecture graph, files docs, and installs matching skills. This router does not need editing — the repo registry above is updated for you.
+Run `/lodestar-onboard ./<new-repo>`.

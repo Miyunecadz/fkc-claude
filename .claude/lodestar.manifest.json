@@ -184,6 +184,12 @@
         "Read(./**/.env.development)",
         "Read(./.env.production)",
         "Read(./**/.env.production)",
+        "Read(./.env.staging)",
+        "Read(./**/.env.staging)",
+        "Read(./.env.test)",
+        "Read(./**/.env.test)",
+        "Read(./.envrc)",
+        "Read(./**/.envrc)",
         "Read(./**/*.pem)",
         "Read(./**/*.key)",
         "Read(./**/*.p12)",
@@ -203,7 +209,7 @@
         "Read(./id_dsa)",
         "Read(./credentials.json)"
       ],
-      "appliedAt": "2026-09-09T15:51:35Z"
+      "appliedAt": "2026-09-27T08:02:58Z"
     },
     "commit": {
       "installed": false,

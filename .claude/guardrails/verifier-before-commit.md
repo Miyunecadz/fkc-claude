@@ -9,9 +9,11 @@ match: argv
 surface: agent
 ---
 
-Before committing a non-trivial change, dispatch the `reviewer` agent on the staged diff (`git diff --cached`) to catch issues a regex can't — logic errors, missing cases, leaked debug code. This is advisory: it reminds you, it does not block the commit.
+Non-trivial change with no review yet? Run the `change-reviewer` agent on `git diff --cached` first. Skip this inside `/implement-review`, which already did.
 
 ---
+
+**Kept to one short line on purpose.** A hook cannot tell whether it runs inside `/implement-review`, where the review has already happened, so the message says to skip it there rather than nagging at length.
 
 **Advisory only, and it fires on every commit.** A `PreToolUse` hook sees the command about to run, not whether you already did the step it asks for — it cannot confirm a scan or review happened, so treat it as a checklist prompt rather than a gate. A real gate needs state written by the prior step or a `commit`-surface git hook (see [[scan-secrets-before-commit]] / issue #3).
 

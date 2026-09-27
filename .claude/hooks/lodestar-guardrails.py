@@ -570,8 +570,12 @@ def matches(rule: dict, event: str, target: str, command: str) -> bool:
 def main():
     try:
         data = json.load(sys.stdin)
-    except Exception:
-        print("{}")
+        if not isinstance(data, dict):
+            raise ValueError("not a JSON object")
+    except Exception as e:
+        print(json.dumps({"systemMessage": not_enforcing(
+            "the hook input was not valid JSON (%s)" % e
+        )}))
         return
 
     hook_event = data.get("hook_event_name", "PreToolUse")

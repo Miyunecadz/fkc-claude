@@ -4,10 +4,21 @@
 Advisory, not blocking — the write has already happened. Exit code 2 hands the
 findings back so they get corrected in the same turn.
 
-Code is exempt: fenced blocks, indented blocks, inline code and URLs are stripped
-before the scan, so `color: red` or `authorizationToken` never trips it.
+Only the text just written is scanned: `content` on Write, `new_string` on Edit and
+MultiEdit. Old text elsewhere in the file is never re-reported.
+
+Scope: workspace-owned prose only — root-level files and anything under `.claude/`,
+`.work/` or `docs/`. Files inside a product repo or any nested git checkout
+(fk-admin-panel-be/, a ticket worktree under .work/) belong to other teams and are
+skipped.
+
+Not prose, so stripped before the scan: fenced, indented and inline code, URLs,
+links, YAML frontmatter, HTML comments, blockquote lines and quoted strings. Words
+that look like code are skipped too: camelCase, ALL_CAPS, and anything holding
+`_ . ( /` — so `normalizeDate()`, `sanitize.js` and `CANCELED` never trip it.
 """
 import json
+import os
 import re
 import sys
 
@@ -18,6 +29,9 @@ EXEMPT_PATHS = (
     "/.claude/skills/plain-uk-english/",
     "/.claude/hooks/",
 )
+
+# Top-level folders of the workspace whose prose is ours. Root-level files count too.
+SCANNED_DIRS = (".claude", ".work", "docs")
 
 # American -> British. Only pairs that are unambiguous in prose.
 SWAPS = {
@@ -54,7 +68,7 @@ SWAPS = {
 ALLOW = {
     "size", "sizes", "sized", "sizing", "prize", "prizes", "seize", "seizes",
     "capsize", "resize", "resized", "resizes", "resizing", "downsize", "upsize",
-    "maize", "assize", "authorized_keys",
+    "maize", "assize", "authorized_keys", "citizen", "citizens",
 }
 
 BANNED_JARGON = [
@@ -63,19 +77,78 @@ BANNED_JARGON = [
     "please be advised", "utilize", "utilise",
 ]
 
+LEAD_STRIP = "([{\"'*_“‘"
+TRAIL_STRIP = ".,;:!?)]}\"'*_”’"
 
-def strip_code(text: str) -> str:
+
+def project_root() -> str:
+    env = os.environ.get("CLAUDE_PROJECT_DIR")
+    if env:
+        return os.path.abspath(env)
+    # <root>/.claude/hooks/uk-english-lint.py
+    return os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+
+
+def in_scope(path: str, root: str) -> bool:
+    """Is this file workspace-owned prose we should check?"""
+    full = os.path.abspath(path if os.path.isabs(path) else os.path.join(root, path))
+    rel = os.path.relpath(full, root).replace("\\", "/")
+    if rel.startswith("../") or rel == "..":
+        return False
+    parts = rel.split("/")
+    if len(parts) > 1 and parts[0] not in SCANNED_DIRS:
+        return False
+    # Any nested git checkout between the file and the root is another repo or a
+    # ticket worktree of one — not our prose.
+    d = os.path.dirname(full)
+    while d.startswith(root) and d != root:
+        if os.path.exists(os.path.join(d, ".git")):
+            return False
+        parent = os.path.dirname(d)
+        if parent == d:
+            break
+        d = parent
+    return True
+
+
+def strip_non_prose(text: str) -> str:
+    text = re.sub(r"\A---\n.*?\n---[ \t]*(\n|\Z)", " ", text, flags=re.S)
+    text = re.sub(r"<!--.*?-->", " ", text, flags=re.S)
     text = re.sub(r"```.*?```", " ", text, flags=re.S)
     text = re.sub(r"~~~.*?~~~", " ", text, flags=re.S)
     text = re.sub(r"`[^`\n]*`", " ", text)
     text = re.sub(r"^(?: {4}|\t).*$", " ", text, flags=re.M)
-    text = re.sub(r"https?://\S+", " ", text)
+    text = re.sub(r"^[ \t]*>.*$", " ", text, flags=re.M)
     text = re.sub(r"\[[^\]]*\]\([^)]*\)", " ", text)
+    text = re.sub(r"https?://\S+", " ", text)
+    text = re.sub(r'"[^"\n]*"', " ", text)
+    text = re.sub(r"“[^”\n]*”", " ", text)
+    text = re.sub(r"(?<![\w])'[^'\n]+'(?![\w])", " ", text)
+    text = re.sub(r"(?<![\w])‘[^’\n]+’(?![\w])", " ", text)
     return text
 
 
+def looks_like_code(word: str) -> bool:
+    if any(c in word for c in "_.(/"):
+        return True
+    if re.search(r"[a-z][A-Z]", word):
+        return True  # camelCase / PascalCase with an inner capital
+    letters = re.sub(r"[^A-Za-z]", "", word)
+    return len(letters) >= 2 and letters.isupper()  # ALL_CAPS / enum value
+
+
+def prose_words(text: str) -> str:
+    kept = []
+    for chunk in strip_non_prose(text).split():
+        word = chunk.lstrip(LEAD_STRIP).rstrip(TRAIL_STRIP)
+        if not word or looks_like_code(word):
+            continue
+        kept.append(word)
+    return " ".join(kept)
+
+
 def findings(text: str):
-    prose = strip_code(text)
+    prose = prose_words(text)
     hits = []
     for pattern, british in SWAPS.items():
         for m in re.finditer(pattern, prose, flags=re.I):
@@ -100,6 +173,8 @@ def main() -> int:
         payload = json.load(sys.stdin)
     except Exception:
         return 0
+    if not isinstance(payload, dict):
+        return 0
 
     tool_input = payload.get("tool_input") or {}
     path = tool_input.get("file_path", "")
@@ -108,13 +183,16 @@ def main() -> int:
     normalised = path.replace("\\", "/")
     if any(part in normalised for part in EXEMPT_PATHS):
         return 0
+    if not in_scope(path, project_root()):
+        return 0
 
-    written = " ".join(
+    written = "\n".join(
         str(tool_input.get(k, ""))
         for k in ("content", "new_string", "new_str")
+        if tool_input.get(k)
     )
     for edit in tool_input.get("edits") or []:
-        written += " " + str(edit.get("new_string", ""))
+        written += "\n" + str(edit.get("new_string", ""))
     if not written.strip():
         return 0
 

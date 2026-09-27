@@ -1,13 +1,13 @@
 ---
 name: screenshot-requirement-analysis
-description: Read screenshots, photos of screens, mockups and annotated images supplied with a request as requirement evidence — page and section, tabs, field labels and values, required markers, controls, table columns and their order, filters and sorts, pagination, empty/error/validation states, toasts, dates and currency formats, roles, environment hints, arrows and mark-ups, before/after pairs — inventory every readable element so none is left out, and judge correctly whether several images are one requirement seen from different angles or genuinely separate asks. Use whenever images accompany a feature request, bug report, ticket, spec or design brief, and especially when the written text is short: images carrying most of the requirement is the common case, not an edge case. Produces the image evidence rows other skills consume; does not classify, gate or write the deliverable.
+description: Read screenshots, photos of screens, mockups and annotated images as requirement evidence — page, tabs, labels and values, columns in order, filters, states, formats, annotations, before/after pairs — inventory every readable element, and judge whether several images are one requirement or separate asks. Use whenever images come with a request, bug report, ticket or spec, especially when the text is short.
 ---
 
 # Screenshot requirement analysis
 
-Images supplied with a request are requirement evidence, not decoration attached to the
-text. Treat them with the same rigour as the words — and with more suspicion, because a
-screenshot shows a hundred things at once and only some of them are the requirement.
+Images supplied with a request are requirement evidence, not decoration. Treat them with
+the same rigour as the words, and more suspicion: a screenshot shows a hundred things and
+only some are the requirement.
 
 Your output is an **inventory**: one row per readable element that could bear on the
 request, ready for the `requirement-evidence-and-gating` skill to tag `VISUAL` and
@@ -58,7 +58,7 @@ element you were not looking for is where the missed requirement usually hides.
 **What state it is in**
 
 - empty state, loading state, disabled controls, read-only fields;
-- validation messages, inline errors, error pages, toasts, banners, confirmation dialogs;
+- validation messages, inline errors, error pages, toasts, banners, confirmation pop-ups (`Dialog`);
 - permissions on show: who is logged in, role indicator, user menu, tenant or company
   selector.
 
@@ -166,12 +166,9 @@ Say so — the requirement may live in the part that was cropped out.
 
 ## 7. Boundaries — what this skill does not own
 
-- **Tagging, coverage and the gate.** Evidence tags, dispositions, materiality, question
-  rounds, the placeholder ban and the "requirement not sufficiently defined" report belong
-  to the `requirement-evidence-and-gating` skill. This skill supplies image rows and
-  question candidates; it does not decide whether the deliverable is written.
-- **The deliverable.** Templates, sections, house style, where it is saved or created, and
-  how images are attached to it belong to the calling skill (for example `ticket-writing`,
-  which owns the Jira ticket template, its `Images` section and its attachment limits).
-- **Verifying against code.** Confirming that what the image shows is what the code does
-  is a `CODEBASE` claim, and the calling skill's job.
+- **Tagging, coverage and the gate** — `requirement-evidence-and-gating`. This skill
+  supplies image rows and question candidates; it does not decide whether the deliverable
+  is written.
+- **The deliverable** — template, sections, where it is created and how images are
+  attached: the calling skill (e.g. `ticket-writing`, which owns the `Images` section).
+- **Verifying against code** — a `CODEBASE` claim, and the calling skill's job.

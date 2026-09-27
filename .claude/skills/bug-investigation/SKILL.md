@@ -5,7 +5,7 @@ description: Use when diagnosing a bug, regression, or unexpected behaviour in a
 
 # Bug investigation (diagnosis only)
 
-**This phase produces a diagnosis, not a patch.** Do not edit code or propose a fix until the user asks for one. Stop at the report in §5.
+**This phase produces a diagnosis, not a patch.** Do not edit code or propose a fix until the user asks for one. Stop at the report in §6.
 
 ## 1. Establish facts before theory
 
@@ -15,46 +15,34 @@ description: Use when diagnosing a bug, regression, or unexpected behaviour in a
 
 ## 2. Locate the code path
 
-Start from the architecture graph, then confirm in source.
-
-Each repo has `docs/<repo>/architecture/graph.json` — a node-link JSON snapshot produced by Graphify (`docs/fk-admin-panel-be/`, `docs/fk-admin-panel-fe/`, `docs/fk-mobile/`). Nodes carry `id`, `label`, `source_file`, `source_location`; links carry `relation`, `source`, `target`, `source_file`, `source_location`. Relations present in these graphs: `contains`, `imports`, `imports_from`, `calls`, `indirect_call`, `references`, `defines`.
-
-Find a symbol and its callers:
+Start from the architecture map, then confirm in source. Always go through the resolver, which picks the map for the tree you name and rebuilds it if the code moved:
 
 ```bash
-python3 - <<'EOF'
-import json
-REPO, TERM = 'fk-admin-panel-be', 'login'   # edit both
-g = json.load(open(f'docs/{REPO}/architecture/graph.json'))
-hits = [n for n in g['nodes'] if TERM.lower() in n['label'].lower()]
-for n in hits[:10]:
-    print(n['id'], '|', n['label'], '|', n.get('source_file'), n.get('source_location'))
-ids = {n['id'] for n in hits}
-print('--- callers ---')
-for l in g['links']:
-    if l['target'] in ids and l['relation'] in ('calls', 'indirect_call', 'imports_from'):
-        print(l['relation'], l['source'], '->', l['target'], '@', l.get('source_file'), l.get('source_location'))
-EOF
+.claude/hooks/graph.sh query    <repo-worktree-or-file> "<symptom words>"
+.claude/hooks/graph.sh affected <path> "<symbol>"   # callers and dependants
+.claude/hooks/graph.sh explain  <path> "<symbol>"
 ```
 
 Then:
 
-- **Confirm every graph hit by reading the file at that line.** The graph is a manual snapshot — no hook rebuilds it on commit, so it can lag the working tree. If it clearly disagrees with source, trust source and mention the drift (`/lodestar-refresh <repo>` rebuilds it).
+- **Confirm every map hit by reading the file at that line.** The map locates; source decides. If they disagree, trust source.
 - Trace **backward** from where the error surfaces to where the bad state originates. They are usually different files.
 - Check the **call sites**, not only the callee — wrong argument, wrong order, or wrong sequencing is a common cause.
 - Read current code. Never rely on remembered framework behaviour. All three repos use **Yarn** (`yarn.lock` in each); for the version actually installed, read `<repo>/node_modules/<pkg>/package.json` or `yarn.lock`, not the range in `package.json`.
 
 ## 3. Surrounding context
 
-- **Git:** the workspace root is *not* a git repo — each of `fk-admin-panel-be`, `fk-admin-panel-fe`, `fk-mobile` is its own. Run `git -C <repo> log`/`blame` on the suspect file; many bugs are regressions.
+- **Git:** the root is its own git repo and ignores the three repos, so each of `fk-admin-panel-be`, `fk-admin-panel-fe`, `fk-mobile` needs `git -C <repo>`. Run `git -C <repo> log`/`blame` on the suspect file; many bugs are regressions.
 - **Tests are not a safety net here.** `fk-admin-panel-be` has no tests at all (`yarn test` is `echo "Error: no test specified" && exit 1`). `fk-admin-panel-fe` has one unit test (`src/utils/routeMatching.test.js`) plus Playwright specs (`browser.test.ts`, `yarn test:chrome|firefox|safari`). `fk-mobile` has `__tests__/App-test.js` and nothing under `src`. So: absence of a failing test is **no evidence**, and "a test would have caught this" is not a finding. Reproduce by running the app or querying the API/DB instead.
-- **Environment:** real `.env` files are blocked from reading by the `block-env-files` guardrail. Use `.env.example` (all three repos; mobile's real tier file is `.env.development`) and `docs/_shared/env-matrix.md` for the expected variable shape. `docs/_shared/local-setup.md` and the root `docker-compose.yml` / `docker-compose.deps.yml` cover bringing dependencies up.
+- **Environment:** real `.env` files are blocked from reading by the `block-env-files` guardrail. Use `.env.example` in each repo for the expected variable shape. The root `docker-compose.yml` and `docker-compose.deps.yml` bring dependencies up.
 - **Data / schema (backend):** migrations are dbmate SQL under `fk-admin-panel-be/db/migrations`; `db/schema.sql` is the generated snapshot (hand-edits blocked by `protect-dbmate-schema`). Read them to check whether the bug is data- or migration-shaped. `yarn db:status` shows what has been applied.
 - If several modules touch the logic, check all of them — do not stop at the first plausible culprit.
 
 ## 4. Cross-repo symptoms
 
-A symptom in `fk-admin-panel-fe` or `fk-mobile` frequently roots in `fk-admin-panel-be`. The graphs cannot show this: repos talk over the API at runtime and Graphify only records static edges, so **no graph contains a cross-repo edge**. The boundary is documented in `docs/_shared/api-contract.md`; check the GraphQL operation there and follow it into the backend resolver. Auth-shaped symptoms: `docs/_shared/auth-model.md`.
+A symptom in `fk-admin-panel-fe` or `fk-mobile` frequently roots in `fk-admin-panel-be`. The graphs cannot show this: repos talk over the API at runtime and Graphify only records static edges, so **no graph contains a cross-repo edge**. Trace it by hand: the client `gql` constant (`fk-admin-panel-fe/src/graphql/` or `fk-mobile/src/graphql/`) → `fk-admin-panel-be/src/typedefs/` → the permission rule in `src/configs/shield.js` → the resolver in `src/resolvers/`. Auth-shaped symptoms start at `shield.js`, `src/utils/permissions/` and `src/utils/auth.js`.
+
+For orientation: `docs/_shared/api-contract.md`, `auth-model.md`, `env-matrix.md` and `local-setup.md`, and `docs/<repo>/conventions.md`. They can lag the code; quote the code, not the doc.
 
 ## 5. Multiple hypotheses before converging
 

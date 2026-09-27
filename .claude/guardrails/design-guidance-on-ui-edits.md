@@ -1,12 +1,14 @@
 ---
 name: design-guidance-on-ui-edits
-enabled: true
+enabled: false
 event: file
 pattern: '\.(tsx|jsx|vue|svelte)$|(^|/)(components?|ui|views|screens|pages|styles)/.*\.(ts|js|css|scss)$'
 severity: warn
 stacks: [has-frontend]
 surface: agent
 ---
+
+Disabled: it fired on every UI edit, named a `ui-designer` agent that does not exist, and asked to install the `frontend-design` plugin that is already installed.
 
 This workspace has a frontend but **no design guidance installed**, so UI is being generated against framework defaults — the shortest path to output that reads as templated: default type scale, default spacing, default component chrome, a palette nobody chose.
 

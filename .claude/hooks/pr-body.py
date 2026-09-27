@@ -11,26 +11,40 @@ The split this file exists to enforce:
 So a badly shaped body costs a hook message, never a rewrite round-trip.
 
 Usage:
-    pr-body.py format [-f FILE]   semantic content in  -> final body on stdout
-    pr-body.py check  [-f FILE]   final body in        -> exit 0 / 1 + report on stderr
-    pr-body.py hook               PreToolUse JSON on stdin (bitbucket bb_post / bb_put)
+    pr-body.py format [-f FILE] [-t TICKET] [-b BASE]   semantic block -> body on stdout
+    pr-body.py check  [-f FILE]                         body -> exit 0 / 1, report on stderr
+    pr-body.py title  [-f FILE]                         title -> printed back, or exit 1
+    pr-body.py hook          PreToolUse JSON on stdin (bitbucket bb_post / bb_put / bb_patch)
 
-Exit: 0 ok | 1 the body is not valid (report on stderr) | 2 bad usage
+Exit: 0 ok | 1 not valid (report on stderr) | 2 bad usage
 
-The shape, and there is no other:
+The body, exactly (`··` is two real spaces, a Markdown hard break):
 
-    Ticket: <key or url>
+    Ticket: [<url>](<url>){: data-inline-card='' }     or a bare key, or `none`
 
-    What
-    <one short paragraph>
+    **What**··
+    <one paragraph>
 
-    Why
-    <one short paragraph>
+    **Why**··
+    <one paragraph>
 
-    Check:
+    **Check**
+
     1. <verification step>
     2. <verification step>
+
+    **Screenshot**                                       optional, always last
+
+    ![](https://bitbucket.org/...){: data-layout='center' }
+
+The title is not part of the body. It lives in its own one-line file and is checked by
+`title` here and again by the hook: one line, at most MAX_TITLE characters, no type
+prefix and no ticket key.
+
+The hook never rewrites what it is given. The user approved the formatter's output byte
+for byte, so a body that differs from it is denied with the diff, not swapped.
 """
+import difflib
 import json
 import re
 import sys
@@ -52,6 +66,12 @@ MAX_CHECKS = 12
 WARN_WORDS = 120           # DESCRIPTION.md's budget — a warning, never a block
 WARN_LINES = 20
 HARD_BREAK = "  "        # trailing spaces = a Markdown line break, not stray whitespace
+MAX_TITLE = 70
+TITLE_PREFIX = re.compile(
+    r"^(?:(?:feat|fix|chore|refactor|docs|test|tests|build|ci|perf|style|revert)"
+    r"(?:\([^)]*\))?!?:|\[?[A-Z][A-Z0-9]*-\d+\b)",
+    re.IGNORECASE,
+)
 
 # Boilerplate headings this workspace never posts. Dropped by `format`, with their
 # content, and reported on stderr. Rejected by `check`.
@@ -191,7 +211,9 @@ def parse(text):
             current, buf = "_unknown", []
             continue
         if current is None:
-            problems.append("text before the Ticket line: %r" % line.strip()[:60])
+            hint = (" — the title goes in its own .title file, not the body file"
+                    if line.strip().lower().startswith("title") else "")
+            problems.append("text before the Ticket line: %r%s" % (line.strip()[:60], hint))
             continue
         buf.append(line)
     flush()
@@ -277,10 +299,15 @@ def ticket_value(raw, base_url=None):
 
 
 # --- format ---------------------------------------------------------------------------
-def format_body(text, base_url=None):
-    """Semantic content -> the final body. Raises Invalid; never invents meaning."""
+def format_body(text, base_url=None, ticket=None):
+    """Semantic content -> the final body. Raises Invalid; never invents meaning.
+
+    `ticket` replaces the Ticket value — for a card link the user supplied at the gate.
+    """
     text, removed = strip_attribution(text.replace("\r\n", "\n"))
     sections, dropped, problems = parse(text)
+    if ticket is not None:
+        sections["ticket"] = [ticket]
 
     ticket = ticket_value(paragraph(sections.get("ticket", [])), base_url)
     what = paragraph(sections.get("what", []))
@@ -451,6 +478,23 @@ def warnings(body):
     return out
 
 
+def validate_title(title):
+    """PR title -> list of problems. The title is not part of the body."""
+    if not isinstance(title, str) or not title.strip():
+        return ["the title is empty"]
+    t = title.strip("\n")
+    if "\n" in t:
+        return ["the title must be one line"]
+    t = t.strip()
+    problems = []
+    if len(t) > MAX_TITLE:
+        problems.append("the title is %d characters — at most %d" % (len(t), MAX_TITLE))
+    if TITLE_PREFIX.match(t):
+        problems.append("the title starts with a type prefix or ticket key — "
+                        "that is the branch and the commit's job")
+    return problems
+
+
 def report(problems, header="PR validation failed."):
     return "%s\n\nMissing or invalid:\n%s\n\nThe PR was not created." % (
         header, "\n".join("- %s" % p for p in problems))
@@ -458,56 +502,97 @@ def report(problems, header="PR validation failed."):
 
 # --- hook -----------------------------------------------------------------------------
 PR_PATH = re.compile(r"^/(?:2\.0/)?repositories/[^/]+/[^/]+/pullrequests(?:/\d+)?/?$")
+PR_CREATE = re.compile(r"^/(?:2\.0/)?repositories/[^/]+/[^/]+/pullrequests/?$")
+PR_WRITE_TOOLS = ("mcp__bitbucket__bb_post", "mcp__bitbucket__bb_put", "mcp__bitbucket__bb_patch")
+FORMAT_HINT = "\n\nWrite the four pieces once and run:\n  .claude/hooks/pr-body.py format"
+
+
+def _visible(line):
+    """Show trailing spaces in a diff line, where the hard break would otherwise vanish."""
+    stripped = line.rstrip(" ")
+    return stripped + "·" * (len(line) - len(stripped))
+
+
+def body_diff(sent, expected, limit=40):
+    lines = list(difflib.unified_diff(
+        [_visible(l) for l in sent.replace("\r\n", "\n").rstrip("\n").split("\n")],
+        [_visible(l) for l in expected.rstrip("\n").split("\n")],
+        "sent", "formatter output", lineterm="", n=1))
+    if len(lines) > limit:
+        lines = lines[:limit] + ["... (%d more diff lines)" % (len(lines) - limit)]
+    return "\n".join(lines)
 
 
 def hook():
+    """PreToolUse guard. Fails closed on a PR write it cannot read; allows anything else."""
+    raw = sys.stdin.read()
     try:
-        payload = json.load(sys.stdin)
-    except Exception:
+        _hook(raw)
+    except Exception as e:                                   # noqa: BLE001 — must not crash
+        if "pullrequests" in raw:
+            deny("PR validation failed.\n\nMissing or invalid:\n- the hook could not read "
+                 "this call (%s: %s)\n\nThe PR was not created. Send the tool input as a "
+                 "JSON object with `path` and a `body` object." % (type(e).__name__, e))
+
+
+def _hook(raw):
+    payload = json.loads(raw)
+    if not isinstance(payload, dict):
+        raise ValueError("the hook payload is not a JSON object")
+    if payload.get("tool_name") not in PR_WRITE_TOOLS:
         return
-    if payload.get("tool_name") not in ("mcp__bitbucket__bb_post", "mcp__bitbucket__bb_put"):
-        return
-    tool_input = payload.get("tool_input") or {}
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        raise ValueError("tool_input is not a JSON object")
     path = tool_input.get("path")
+    if not isinstance(path, str):
+        return
+    path = "/" + path.strip().split("?")[0].lstrip("/")
+    if not PR_PATH.match(path):
+        return
     body = tool_input.get("body")
-    if not isinstance(path, str) or not PR_PATH.match(path.split("?")[0]):
-        return
+    if isinstance(body, str):
+        try:
+            body = json.loads(body)
+        except ValueError:
+            deny(report(["the request body is a string that is not JSON — send an object"]))
+            return
     if not isinstance(body, dict):
+        deny(report(["the request body is not a JSON object"]))
         return
-    # a PUT that touches neither description nor title is not a PR write we own
-    if "description" not in body and "title" not in body:
-        return
-
-    desc = body.get("description")
-    if not isinstance(desc, str) or not desc.strip():
-        deny("PR validation failed.\n\nMissing or invalid:\n- the body is empty\n\n"
-             "The PR was not created. Build the description with:\n"
-             "  .claude/hooks/pr-body.py format")
+    create = bool(PR_CREATE.match(path))
+    # an update that touches neither description nor title is not a PR write we own
+    if not create and "description" not in body and "title" not in body:
         return
 
-    problems = validate(desc)
+    problems = []
+    if create or "title" in body:
+        problems += validate_title(body.get("title"))
+    expected = None
+    if create or "description" in body:
+        desc = body.get("description")
+        if not isinstance(desc, str) or not desc.strip():
+            problems.append("the body is empty")
+        else:
+            found = validate(desc)
+            if found:
+                try:
+                    expected = format_body(desc)[0]
+                except Invalid as e:
+                    problems += e.problems
+                else:
+                    problems += found
+                    if validate(expected):
+                        expected = None
     if not problems:
-        return                                   # already the required shape — allow
-
-    try:
-        fixed, notes = format_body(desc)
-    except Invalid as e:
-        deny(report(e.problems) + "\n\nWrite the four pieces once and run:\n"
-             "  .claude/hooks/pr-body.py format")
-        return
-    remaining = validate(fixed)
-    if remaining:
-        deny(report(remaining))
-        return
-
-    print(json.dumps({
-        "systemMessage": "PR description normalised by pr-body.py"
-                         + (" (%s)" % "; ".join(notes) if notes else ""),
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "updatedInput": {**tool_input, "body": {**body, "description": fixed}},
-        },
-    }))
+        return                                   # already the contract — allow
+    reason = report(problems)
+    if expected is not None:
+        reason += ("\n\nNothing was rewritten. If this diff is only layout, post the "
+                   "formatter output the user approved:\n" + body_diff(body["description"], expected))
+    else:
+        reason += FORMAT_HINT
+    deny(reason)
 
 
 def deny(reason):
@@ -532,12 +617,15 @@ def main(argv):
 
     base_url = None
     src = None
+    ticket = None
     while args:
         a = args.pop(0)
         if a in ("-f", "--file"):
             src = args.pop(0) if args else None
         elif a in ("-b", "--ticket-base"):
             base_url = args.pop(0) if args else None
+        elif a in ("-t", "--ticket"):
+            ticket = args.pop(0) if args else None
         else:
             sys.stderr.write("unknown argument: %s\n" % a)
             return 2
@@ -545,13 +633,21 @@ def main(argv):
 
     if mode == "format":
         try:
-            body, notes = format_body(text, base_url)
+            body, notes = format_body(text, base_url, ticket)
         except Invalid as e:
             sys.stderr.write(report(e.problems) + "\n")
             return 1
         for n in notes + warnings(body):
             sys.stderr.write("note: %s\n" % n)
         sys.stdout.write(body)
+        return 0
+
+    if mode == "title":
+        problems = validate_title(text)
+        if problems:
+            sys.stderr.write(report(problems) + "\n")
+            return 1
+        sys.stdout.write(text.strip() + "\n")
         return 0
 
     if mode == "check":

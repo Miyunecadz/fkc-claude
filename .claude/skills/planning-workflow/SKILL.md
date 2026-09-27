@@ -1,17 +1,24 @@
 ---
 name: planning-workflow
-description: Use when scoping, spec'ing, or breaking down a feature — BEFORE any code is written. Not for implementation.
+description: Use when scoping or breaking down a feature in this workspace BEFORE any code is written. For an FKC Jira ticket, use /implement-ticket instead. Produces a plan, never code.
 stacks: [all]
 ---
 
 # Planning workflow
 
-Turn a feature request into a cross-repo plan. You write no code here — the point is the map, not the hands (see `docs/CONCEPTS.md` §3).
+**FKC ticket?** Use `/implement-ticket` (the `ticket-delivery` skill). It owns
+analysis, planning and gates. Stop here.
 
-**The loop:**
+**Otherwise,** plan without writing code:
 
-1. Read `docs/_shared/api-contract.md` — the API contract is the **spine**. Read `docs/repo-map.md` to see which repos the feature touches and how.
-2. **Identify the contract change first.** If the feature moves data across a repo boundary, the shared API surface changes, and that change drives everything else. Plan it before anything else.
-3. Produce a task breakdown: the smallest tasks that each have a crisp done-condition, **tagged by repo and by role** (`migration-writer`, `resolver-writer`, `implementer`, `test-writer`, …), ordered by dependency.
+1. **Which repos?** If data crosses the API, the GraphQL change comes first and drives
+   the rest. Load `graphql-contract`.
+2. **Which files?** List each file to touch or add, per repo. Every path must be
+   confirmed with `.claude/hooks/graph.sh query <repo> "<feature>"` or `grep`.
+   Mark new files as new.
+3. **Which pattern?** Name one existing file per repo to copy.
+4. **Steps.** Small, ordered by dependency (migration → typedef/resolver/permission →
+   clients), each with a clear done-condition.
+5. **Open questions.** Anything the code or the request does not settle. Do not guess.
 
-**Do NOT load coding-standards skills during planning** (`backend-standards`, `frontend-standards`, `mobile-standards`, etc.). Those are for execution. Loading them now is the wrong thing at the wrong time — planning is about the shape of the work across repos, not how any one repo writes code.
+Do not load the repo standards skills while planning. They are for writing code.

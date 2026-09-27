@@ -97,7 +97,7 @@ def main():
             # Still blocked: the rule must keep catching real trunk commits.
             ("bare commit at root (main)", "git commit -m 'chore: x'", "deny", "block-commit-to-default-branch"),
             ("commit in checkout on master", "git -C repo commit -m 'feat: x'", "deny", "block-commit-to-default-branch"),
-            ("push in checkout on master", "git -C repo push origin master", "deny", "block-commit-to-default-branch"),
+            ("push in checkout on master", "git -C repo push origin feat/x", "deny", "block-commit-to-default-branch"),
             # Several targets stays protective: one on trunk is enough to fire.
             ("mixed targets, one on trunk",
              "git -C .work/K-1/repo commit -m a && git -C repo commit -m b", "deny",

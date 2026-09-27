@@ -6,319 +6,278 @@ stacks: [all]
 
 # Ticket delivery
 
-Take a ticket that already exists in Jira and carry it to a reviewed, validated change on
-a branch in an **isolated worktree per repo**. Two entry points, with a human pause between
-them: `/implement-ticket <KEY>` writes the code and stops at `IMPLEMENTED`;
-`/implement-review <KEY>` validates, reviews and commits it once a human has read it.
+Carry a Jira ticket to a validated, reviewed, committed change on a branch. Two commands,
+with a human pause between them:
 
-Not this skill: writing or refining tickets (`ticket-writing`, `/create-ticket`), pushing,
-opening the PR (`pull-request`, `/create-pr`), or deploying. It ends at a reviewed,
-committed worktree plus a handover note.
+```
+/implement-ticket   Locate (+images) → Prepare → Analyse → Plan → [approve] → Implement   ends IMPLEMENTED
+      ── the dev reads the diff, and normally tweaks it by hand ──
+/implement-review   Validate → Review → Handover (commit)                                 ends HANDED_OVER
+/create-pr          push → PR → the ticket's delivery comment                             ends PR_OPEN
+```
 
-Three things this workflow refuses to be wrong about, and every rule below exists for one
-of them:
+This skill is the one owner of the rules. The commands are orchestration and point here.
+Not this skill: writing tickets (`ticket-writing`), pushing or the PR (`pull-request`),
+deploying.
+
+Four things this workflow refuses to be wrong about:
 
 1. **The ticket may have moved.** Jira is the ticket; a copy read an hour ago is a memory.
-2. **The codebase may have moved.** A branch cut yesterday, and a graph built from another
-   branch, both describe code that is no longer what will be merged into.
-3. **The main context may not hold the codebase.** Reading is delegated; conclusions come
+2. **The codebase may have moved.** A branch cut yesterday describes code that may no
+   longer be what the work merges into.
+3. **The main thread cannot hold the codebase.** Reading is delegated; conclusions come
    back, file bodies do not.
-4. **The work may not be on this machine.** `.work/<KEY>/` is local and is never committed,
-   so a ticket another dev implemented is invisible here. Jira is the only record that
-   travels — which is why `/create-pr` writes a delivery comment and both other commands
-   check for one before starting.
+4. **The work may not be on this machine.** `.work/<KEY>/` is local and never committed.
+   Jira is the only record that travels, which is why `/create-pr` writes a delivery
+   comment and both commands check for one first ([`FRESHNESS.md`](./FRESHNESS.md) §1).
 
 ## 1. The ticket workspace
 
-Everything for one ticket lives under one directory, so two tickets never share state:
-
 ```
-.work/<KEY>/work.md            state sidecar — the only file the main thread writes
-.work/<KEY>/meta/<repo>.env    MODE / BASE_REF / BASE_SHA / BRANCH, recorded at prepare time
-.work/<KEY>/meta/<repo>.graph  which commit the ticket's graph was built from
-.work/<KEY>/validate/<repo>.log   full check output   (never pasted into context)
-.work/<KEY>/review/<n>.md         full reviewer report (never pasted into context)
-.work/<KEY>/<repo>/            the checkout — worktree mode only; absent in-place
+.work/<KEY>/work.md                 state sidecar — the only file the main thread writes
+.work/<KEY>/meta/<repo>.env         MODE / BASE_REF / BASE_SHA (full sha) / BRANCH / PREV_BRANCH
+.work/<KEY>/meta/<repo>.env.released  an in-place hold that was released; holds nothing
+.work/<KEY>/meta/<repo>.graph       stamp of the worktree's map (worktree mode)
+.work/<KEY>/validate/<repo>.log     full check output — never pasted into context
+.work/<KEY>/review/<round>.md       full reviewer report — never pasted into context
+.work/<KEY>/<repo>/                 the checkout — worktree mode only
 ```
 
-**Where the code lives depends on the mode the user chose**, which is why the last line is
-conditional. `/implement-ticket` asks at §2: a **worktree** under `.work/<KEY>/<repo>/`, or
-**in-place** in the user's own `<repo>/`. Never assemble that path — ask for it:
+The code lives in one of two places, chosen by the user per ticket: a **worktree** under
+`.work/<KEY>/<repo>/`, or **in-place** in the user's own `<repo>/`. Never build the path.
+Ask for it:
 
 ```bash
 tree=$(.claude/hooks/ticket-worktree.sh tree <KEY> <repo>)
 ```
 
-`.work/` itself is outside all three repos and the workspace root is not a git repo, so
-nothing here is ever committed by accident. Both modes, their trade-offs and their rules:
-[`WORKTREE.md`](./WORKTREE.md).
+Modes, trade-offs, base choice, branch names and dependencies: [`WORKTREE.md`](./WORKTREE.md).
 
-**The sidecar is written through `ticket-worktree.sh sidecar`, never by hand.** The main
-thread has no `Edit` and no `Write`; the subcommand appends the section, sets `state:` and
-writes the `## Log` line in one atomic step, and it cannot overwrite a finished section:
+**The sidecar is written only through the hook.** The main thread has no `Edit` or `Write`.
 
 ```bash
 .claude/hooks/ticket-worktree.sh sidecar init   <KEY> "<summary>"
-.claude/hooks/ticket-worktree.sh sidecar header <KEY> jira=... repos=... graph=...
-.claude/hooks/ticket-worktree.sh sidecar append <KEY> Analyse ANALYSED <<'EOF'
-<body — conclusions and citations>
+.claude/hooks/ticket-worktree.sh sidecar header <KEY> jira="updated=<ISO> status=<name>" repos="..." graph="..."
+.claude/hooks/ticket-worktree.sh sidecar append <KEY> <Section> <STATE> [--note "<log line>"] <<'EOF'
+<body — conclusions and path:line citations>
 EOF
-.claude/hooks/ticket-worktree.sh sidecar state  <KEY> BLOCKED "<what is missing>"
-.claude/hooks/ticket-worktree.sh sidecar show   <KEY> [--header|--sections]
+.claude/hooks/ticket-worktree.sh sidecar state  <KEY> <STATE> ["<note>"]
+.claude/hooks/ticket-worktree.sh sidecar state  <KEY> BLOCKED "<what is missing, who can answer>"
+.claude/hooks/ticket-worktree.sh sidecar show   <KEY> --header | --sections | --last [Section...]
 ```
 
-Appending by heredoc-rewriting `work.md` is what this replaces: it cost 1–2k output tokens
-per stage, which then sat in context for the rest of the ticket.
+- `append` adds the section above `## Log`, sets `state:`, clears `blocked:` and logs it,
+  in one step. A repeated name becomes `Implement (2)`. A finished section cannot be
+  rewritten.
+- `BLOCKED` is a flag, not a state. It sets `blocked:` and leaves `state:` alone. The next
+  `append` with a real state clears it.
+- `append ... Implement` is refused once the current plan has two Implement sections (the
+  build and one fix round). A new `## Approval` starts a new count.
+- Body lines starting `# ` or `## ` are demoted to `### `, so they cannot pose as sections.
+- Read it back with `show --last` (header plus the last section of each name; default
+  `Implement Review`). Use a bare `show` only when a human asks for the whole file.
 
-**Sidecar shape** — header keys, then one section per completed stage, appended in order:
+**Sidecar shape** — the header, then sections in the order they happened:
 
 ```markdown
 # Work — FKC-123
 ticket:   FKC-123 — <summary>
-jira:     updated=<ISO from the issue> status=<name> fields-sha=<8 hex>
-state:    NEW | ANALYSED | PLANNED | APPROVED | IMPLEMENTING | IMPLEMENTED | VERIFIED |
-          REVIEWED | HANDED_OVER | PR_OPEN | BLOCKED | NOT_NEEDED | ALREADY_IMPLEMENTED |
-          NOT_APPROVED
+jira:     updated=<the issue's updated> status=<name>
+state:    <one state from §3>
 blocked:  - | <one line: what is missing and who can answer it>
-repos:    fk-admin-panel-be@feat/FKC-123-x from origin/staging@<sha>
-graph:    fk-admin-panel-be=worktree-extract@<sha>
+repos:    <repo>@<branch> from <base-ref>@<sha> (<mode>); ...
+graph:    <repo>=<source>@<sha>; ...
 
-## Analyse — <date>
+## Locate — <date>      scope, user decisions at Locate, delivered-already checks (optional)
+## Evidence — <date>    image rows and the attachment manifest, or NONE
+## Analyse — <date>     one block per analyst report
 ## Plan — <date>
-## Approval — <date>
-## Implement — <date>
-## Validate — <date>
-## Review — <date>
-## Handover — <date>
-## Log            every state change, one line, timestamped
+## Approval — <date>    the user's decision, verbatim
+## Implement — <date>   implementer CHANGED / DEVIATIONS / NOT DONE per repo
+## Validate — <date>    prepared vs observed (VALIDATION.md)
+## Review — <date>      verdict, AC rows, blocking findings, report path
+## Handover — <date>    commits per repo
+## PR — <date>          written by /create-pr
+## Log                  every state change, one timestamped line
 ```
 
-Rules:
+`## Decisions` and `## Freshness` are also used when a gate needs one. Old sidecars may
+carry `fields-sha=` in `jira:`; ignore it.
 
-- **Append; never rewrite a completed section.** A second pass adds `## Validate (2)` —
-  `sidecar append` does this for you, and refuses to clobber.
-- `state:` and the `## Log` line move with the section, in the same call. An interrupted
-  run must never claim progress it did not make.
-- **Write each stage down as it finishes, not at the end.** The sidecar is the ticket's
-  memory: it outlives every agent's context and any compaction of the main thread. What
-  is not in it is lost, and a resumed run has no way to know it ever existed.
-- Store decisions and evidence — `path:line`, a sha, one decisive output line — not prose,
-  not the ticket text, not diffs. The reviewer reads the ticket and the diff itself.
-- Re-running either command resumes from `state:`, and each refuses the states that belong
-  to the other. Check the sidecar
-  before writing anything; nothing here is safe to duplicate.
+Rules: write each stage down **as it finishes**. Store decisions and evidence (`path:line`,
+a sha, one decisive output line), not prose, not ticket text, not diffs.
 
 ## 2. Stages and gates
 
-Strictly ordered — each stage consumes the previous one's output.
+| Stage | Who | Produces | State after | Gate |
+|---|---|---|---|---|
+| Locate | main thread | the issue read once in full; fingerprint; scope | `NEW` | issue exists, not delivered already (FRESHNESS §1), affected systems named |
+| Evidence | main thread + `screenshot-requirement-analysis` | image rows and attachment manifest in `## Evidence` | `NEW` | every image inventoried. An image that contradicts the text, or an illegible region that changes the build, is a §7 stop |
+| Prepare | `ticket-worktree.sh prepare` + `ticket-freshness.sh graph` | the tree per repo, cut from the fetched base | — | every repo in scope has a tree |
+| Analyse | `ticket-analyst`, one per repo, parallel | current behaviour, files to change, unknowns, conflicts | `ANALYSED` | no material unknown; nothing needed is missing from the base |
+| Plan | main thread | files per repo, pattern, order, contract, checks, out of scope | `PLANNED` | — |
+| **Approval** | the user | the decision, verbatim | `APPROVED` or `NOT_APPROVED` | **nothing is edited before this** |
+| Implement | `ticket-implementer`, one per repo | the change | `IMPLEMENTING` → `IMPLEMENTED` | plan followed, or the deviation recorded |
+| **Human read** | the dev | their own tweaks | `IMPLEMENTED` | `/implement-ticket` ends here |
+| Validate | `ticket-validator`, one per repo, parallel | prepared vs observed checks | `VERIFIED`, `UNVERIFIED` or `FAILED_VERIFICATION` | no check failed |
+| Review | `change-reviewer`, mode `gate`, one | verdict, one row per AC | `REVIEWED` or `REVIEW_FAILED` | verdict PASS |
+| Handover | main thread | one commit per repo | `HANDED_OVER` | — |
 
-The pipeline is split across **two commands**, with a human pause between them:
+**The reviewer reports; it never fixes.** `/implement-review` has no implementer, so the
+dev's hand edits are never rewritten under them. A failed review leaves two routes: fix by
+hand and re-run `/implement-review`, or re-run `/implement-ticket` for one agent fix round.
 
-```
-/implement-ticket   Locate (+images) → Prepare → Analyse → Plan → [approve] → Implement
-                                                                         ends IMPLEMENTED
-      ── the dev reads the diff, and normally tweaks it by hand ──
-/implement-review   Validate → Review → Handover (commit)                        ends HANDED_OVER
-/create-pr          push → PR → the ticket's delivery comment                    ends PR_OPEN
-```
+**Fix rounds: one per approved plan.** The hook refuses a third Implement section. A finding
+still standing after the fix round is recorded with `sidecar state <KEY> BLOCKED` and goes
+to the user.
 
-| Stage | Command | Who does it | Produces | State after | Gate before moving on |
-|---|---|---|---|---|---|
-| Locate | implement | main thread | the Jira issue read once (`fields="*all"`, `include="comments"`), fingerprint recorded, repos in scope | `NEW` | issue exists, carries no delivery comment, has not moved past implementation, and names its affected systems |
-| Evidence | implement | main thread + `screenshot-requirement-analysis` | the ticket's images read **once**, inventoried as rows in `## Evidence`; non-image attachments recorded as a manifest and **not** downloaded | `NEW` | every attached image has been inventoried, or the ticket has none. A contradiction between an image and the ticket text, or an illegible region that would change the build, is a §5 stop |
-| Prepare | implement | `ticket-worktree.sh` + `ticket-freshness.sh graph` | a worktree per repo, cut from the **fetched** base; a graph built from that worktree | — | every repo in scope has a worktree and a graph whose `GRAPH_SHA` is its HEAD |
-| Analyse | implement | `ticket-analyst`, one per repo, **parallel** | requirement interpretation, affected files as `path:line`, unknowns, risks, image-row-vs-code conflicts | `ANALYSED` | no material unknown; nothing the ticket needs is missing from the base; every image row for that repo's surface is either satisfied by the plan or raised as a `CONFLICT` |
-| Plan | implement | main thread | files to touch per repo, pattern to follow, cross-repo order, the contract if one changes, validation commands, out of scope | `PLANNED` | — |
-| **Approval** | implement | the user | the decision, recorded verbatim | `APPROVED` | **the user approves.** Nothing under any worktree is edited before this. A presented plan is not an approved one |
-| Implement | implement | `ticket-implementer`, one per repo | the change, scoped to the plan | `IMPLEMENTING` → `IMPLEMENTED` | plan followed, or the deviation recorded in `## Implement` |
-| **Human read** | — | the dev | whatever they change by hand | `IMPLEMENTED` | **the command ends here.** Nothing is validated, reviewed or committed until a human has read the code |
-| Validate | review | `ticket-validator`, one per repo, **parallel** | prepared checks vs observed results, decisive lines only | `VERIFIED`, else `FAILED_VERIFICATION` | every applicable check ran and passed — a check that did not run is never recorded as passing |
-| Review | review | `change-reviewer`, mode `gate`, **one, sequential** | independent verdict, AC by AC | `REVIEWED` | no blocking finding stands, and no AC row is `[FAIL]` |
-| Handover | review | main thread | commit per repo, report | `HANDED_OVER` | — |
+**Judge against the acceptance criteria, not the plan.** Once a human has edited the code the
+plan no longer describes it. The AC is the yardstick that survives.
 
-Terminal endings without implementation are legitimate, not failures: `NOT_NEEDED`,
-`ALREADY_IMPLEMENTED`, `NOT_APPROVED`, `BLOCKED`.
+**Freshness is checked at five points** — what each command actually does:
 
-**`IMPLEMENTED` is the pause, and no state was added for it.** The command ending is what
-makes it durable: a blocking prompt dies when the dev goes home, and the dev who comes back
-may be a different person on a different day.
+| Point | Jira half | Git half |
+|---|---|---|
+| `/implement-ticket` Locate | read in full, fingerprint recorded | — |
+| `/implement-ticket` before presenting the Plan | — | `check` |
+| `/implement-ticket` before Implement | re-read and compare | `check` |
+| `/implement-review` entry | re-read and compare, never re-record | `check` |
+| `/implement-review` before the commit | — | `check` |
 
-**The reviewer reports; it never fixes.** `/implement-review` has no `ticket-implementer` —
-a command that both checks the code and can rewrite it would put the dev's hand-edits at
-risk and would review a version they never saw. A blocking finding leaves two routes: the
-dev fixes it by hand and re-runs `/implement-review`, or re-runs `/implement-ticket`, which
-owns the implementer and the cap.
+What each verdict forces: [`FRESHNESS.md`](./FRESHNESS.md).
 
-**The fix round is capped at two.** A finding sends only the repo it names back through
-implement → validate → review, appended as `(2)`. There is no round three: it is recorded,
-`blocked:` is set, and it goes to the user — a reviewer twice wrong about the same code will
-not be right on the third pass, and a round costs 1.2–2.5M tokens.
+## 3. States — the one resume table
 
-**Judge against the ticket's acceptance criteria, not the plan.** Once a human has edited the
-code — or a second dev has reimplemented it their own way — the plan no longer describes what
-is there. The AC is the only yardstick that survives that, which is why the reviewer returns
-one PASS/FAIL row per criterion.
+`state:` holds exactly one of these. `blocked:` is separate (§1).
 
-**Freshness is re-checked at five points**, not once: before presenting the Plan, before
-Implement, at the start of `/implement-review`, before Review, and before the commit. Both
-halves — the Jira issue and the base branch. [`FRESHNESS.md`](./FRESHNESS.md) owns how, and
-what each verdict forces.
+| State | Means | `/implement-ticket` | `/implement-review` |
+|---|---|---|---|
+| `NEW` | Located; maybe Evidence written | continue from the first missing section | not ready: point at `/implement-ticket`, stop |
+| `ANALYSED` | analyst reports recorded | write the Plan | not ready, stop |
+| `PLANNED` | plan written, not approved | present the plan again, wait | not ready, stop |
+| `APPROVED` | user approved | Implement | not ready, stop |
+| `IMPLEMENTING` | a run died mid-Implement | run `status`; re-dispatch the repos with no Implement row | not ready, stop |
+| `IMPLEMENTED` | code written, nothing judged | nothing to do: point at `/implement-review` | **normal entry**: Validate |
+| `FAILED_VERIFICATION` | a check failed | fix round | re-validate (the dev fixed it by hand) |
+| `UNVERIFIED` | checks ran clean but none could speak to the change, or none exist (`fk-mobile`) | point at `/implement-review` | Review, then say plainly nothing automated verified it |
+| `VERIFIED` | every applicable check ran and passed | point at `/implement-review` | re-validate (the tree may have moved), then Review |
+| `REVIEW_FAILED` | reviewer returned FAIL | fix round | re-validate, then re-review (the dev fixed it by hand) |
+| `REVIEWED` | reviewer returned PASS; not committed | point at `/implement-review` | re-check git freshness, then commit |
+| `HANDED_OVER` | committed in the tree | stop: point at `/create-pr` | stop: point at `/create-pr` |
+| `PR_OPEN` | PR open, delivery comment written | stop | stop |
+| `NOT_NEEDED`, `ALREADY_IMPLEMENTED`, `NOT_APPROVED` | ended without a change, reason in the last section | report the reason, stop. Restart only if the user asks | same |
 
-## 3. What runs in parallel, and what never does
+`blocked:` set, in any state: report it, ask whether it is resolved, and only then continue
+from `state:`. An old sidecar with `state: BLOCKED` pre-dates the flag: read the last real
+state from `## Log` and ask.
 
-| Runs in parallel | Because |
+## 4. What runs in parallel, and what never does
+
+| Parallel | Because |
 |---|---|
-| Analyse, one agent per repo | reads only; the repos are independent codebases |
-| Implement, one agent per repo | separate worktrees, separate branches — **only when the plan pins the API contract** (see below) |
-| Validate, one agent per repo | separate worktrees; the checks do not share state |
-| Two different tickets, in two sessions | separate `.work/<KEY>/`, separate worktrees, separate branches |
+| Analyse, one agent per repo | read-only, independent codebases |
+| Implement, one per repo — **only when the plan pins the exact API contract** | separate trees and branches |
+| Validate, one per repo | the checks share no state |
 
-Never concurrent:
+Never at the same time: two writers in one tree; client code against an unpinned contract
+(the backend goes first — load `graphql-contract`); more than one reviewer, or review before
+every repo has validated; anything in a user checkout the ticket was not given in-place.
 
-- **Two agents in the same worktree.** One worktree, one writer, at a time.
-- **Implementation across repos when the contract is not pinned.** If the ticket changes
-  the GraphQL surface and the plan does not state the exact SDL, the backend slice goes
-  first and the clients follow; otherwise the clients are coding against a guess. Load
-  `graphql-contract` when the change crosses a repo boundary.
-- **Review.** One reviewer, after every repo has validated. Reviewing half a change is
-  reviewing the wrong change.
-- **Anything at all with the user's own checkouts.** `fk-admin-panel-be/`,
-  `fk-admin-panel-fe/` and `fk-mobile/` are read-only for this workflow.
+## 5. Context discipline
 
-Yarn installs are not parallel-safe here either: worktrees **share** the main checkout's
-`node_modules` by symlink. Never run `yarn install`, `yarn add` or `yarn upgrade` inside a
-worktree — it writes through the link into the user's checkout. See [`WORKTREE.md`](./WORKTREE.md) §3.
+The main thread reads the Jira issue, the sidecar and the agents' reports. It never reads
+source, diffs or build logs.
 
-## 4. Context discipline — the detail stays on disk
+**Budget:** `/implement-ticket` 25 `Bash` calls, `/implement-review` 15, per run. Count at
+each stage boundary. Past it, stop, report where you are and what is left, and let the user
+decide. This overrides the session's general advice to read with `cat` and edit with
+heredocs: here, reading and editing are always delegated.
 
-The main thread orchestrates. It reads the Jira issue, the sidecar and the agents' reports,
-and it writes the sidecar through the hook. It does **not** read source files, diffs or
-build logs — that is what the agents are for, and it is the whole reason this workflow
-survives a long ticket.
-
-**This is a budget, not an aspiration: 25 `Bash` calls for the whole ticket**, covering the
-hook scripts, the freshness checks, the sidecar and the handover commits. Measured runs
-that ignored it spent 27–434 calls and 8–95M tokens, main thread accounting for 62–93% of
-the total. The arithmetic is `calls × context`: an orchestrator call carries 100–240k of
-context, an agent call 17–22k, and the agent's context is discarded when it returns instead
-of compounding into every later call. Delegating the same work is 3–5× cheaper per call and
-does not grow the main thread at all.
-
-Forbidden in the main thread, because each has an owner:
-
-| Never in the orchestrator | Owner |
+| Never in the main thread | Owner |
 |---|---|
-| `cat`/`sed -n`/`head` a source file, `grep` a repo, `graph.sh query` | `ticket-analyst` |
-| any write to a source file — `cat >`, `python3 - <<EOF`, an editor | `ticket-implementer` |
+| `cat`/`sed -n`/`head` on a source file, `grep` a repo, `graph.sh query` | `ticket-analyst` (or `change-reviewer` in review) |
+| any write to a source file (`cat >`, `python3 - <<EOF`, an editor) | `ticket-implementer` |
 | `yarn build`/`lint`/`test`, `node --check` | `ticket-validator` |
-| `git diff` to read the change (a `--stat` line is fine) | `change-reviewer` |
+| `git diff` to read the change (`--stat` is fine) | `change-reviewer` |
+| `mcp__jira__jira_download_attachments` (returns base64 into context) | `ticket-analyst` |
 
-Needing a file's contents to decide something means **asking the agent that read it** — its
-context still holds the file. Continue that agent with `SendMessage` rather than opening the
-file or spawning a fresh one that has to read it all over again.
+Need a file's contents to decide? **`SendMessage` the agent that read it.** Its context still
+holds the file. Do not open it, and do not spawn a fresh agent to read it again.
 
-Every agent obeys the same contract:
+Every agent: returns conclusions with `repo path:line` citations, never file bodies, diffs
+or logs; stays near 40 lines; says `UNKNOWN — REQUIRES VERIFICATION` rather than filling a
+gap; edits only inside the tree it was given; never commits.
 
-- Return **conclusions with citations** (`repo path:line`), never file bodies, never a full
-  diff, never a full log. A decisive output line is quoted; the rest is written to
-  `.work/<KEY>/…` and referenced by path.
-- Cap the report at roughly 40 lines. Longer means it is reporting its work instead of its
-  findings.
-- Say `UNKNOWN — REQUIRES VERIFICATION` rather than filling a gap. An invented field,
-  table, permission or route is the failure this workflow exists to prevent.
-- Never edit outside the worktree it was given, and never commit unless told to.
+### What each dispatch carries
 
-If the main thread needs a file's content to decide something, it asks the agent that has
-already read it — it does not open the file.
-
-### Nothing is lost at a stage boundary
-
-Cheap delegation fails the moment an agent has to rediscover what the previous stage
-already paid to learn. Each dispatch therefore carries the earlier stages' findings
-forward, copied from the sidecar:
-
-| Stage | Receives, verbatim from the sidecar |
+| Stage | Receives |
 |---|---|
-| Analyse | the ticket's requirement text for that repo, worktree path, base `ref@sha`, graph path |
-| Plan | every analyst's full report (this is the main thread's own stage) |
-| Implement | its plan slice · the analyst's `FILES TO CHANGE`, `PATTERN / REUSE`, `MISSING FROM THIS BASE`, `RISKS` |
-| Validate | the implementer's `CHANGED` and `DEVIATIONS` · the plan's validation commands |
-| Review | the ticket text · the plan · the implementer's `CHANGED`/`DEVIATIONS` · the validator's verdict |
-| Handover | the sidecar, read back with `sidecar show` |
+| Analyse | ticket key; that repo's requirement text **quoted**; tree path; base `ref@sha`; that repo's `## Evidence` rows verbatim (marked as what a screenshot showed) and the attachment manifest |
+| Implement | its plan slice verbatim; the analyst's `FILES TO CHANGE`, `PATTERN / REUSE`, `MISSING FROM THIS BASE`, `RISKS`; user decisions in their own words; tree path |
+| Fix round | the failing AC rows and blocking findings from the last `## Review`, verbatim; tree path |
+| Validate | tree path, branch; the implementer's `CHANGED` and `DEVIATIONS`; the plan's checks |
+| Review | **paths only**: key, tree paths and branches, sidecar path, round number, mode `gate`. The reviewer reads Jira, the sidecar and the diff itself |
 
-Requirement text and user decisions travel **quoted, never summarised** — a paraphrase is
-where a requirement quietly changes. A `path:line` citation travels instead of the file:
-the receiving agent opens it in its own context, which is the cheap place to hold it.
+Requirement text and user decisions travel quoted, never summarised. A `path:line` travels
+instead of the file.
 
-A report that turns out to be too thin to act on is a follow-up to **that same agent** via
-`SendMessage` — it still has the file loaded. Re-reading it in the main thread, or spawning
-a fresh agent to read it again, both pay for the same work twice.
+## 6. Evidence and existing code
 
-## 5. Evidence discipline
-
-- The requirement comes from the Jira issue. Its wording and its business rules are not
-  yours to reinterpret; a gap goes back to the requester.
-- Any claim about current behaviour comes from code read **in the worktree**, at the base
-  the work is cut from — not from memory, not from the workspace `docs/` map unless
-  `FRESHNESS.md` says that map matches this commit.
-- Graph answers are a map, not the territory: `graph.sh query <path> "<question>"` finds the
-  place, the file confirms the fact. Address it by path — `graph.sh` resolves which of this
-  workspace's maps describes that path and refreshes it before answering, so `--graph` is
-  never passed by hand.
-- Everything else is an unknown: record it, ask if it changes the work, never build on it.
-
-## 6. Follow the code that is already there
-
-Order: reuse → extend → compose → refactor → create. Before adding a util, hook, component,
-resolver or table, look for the existing one — and confirm it exists **on this base**.
-
-Load the repo's own standards skill when writing its code, and nothing else:
-`backend-standards`, `frontend-standards`, `mobile-standards`; `graphql-contract` when the
-change crosses the API boundary; `architecture-overview` when tracing a flow between repos.
-Do not restate them here.
+- The requirement comes from Jira. A gap goes back to the requester.
+- A claim about current behaviour comes from code read **in the tree**, at its base.
+- `graph.sh query <tree> "<question>"` locates; the file at `path:line` confirms. Never
+  pass `--graph`. Community names come from graphify's labelling pass (claude CLI) and may
+  be missing; the map has no cross-repo edges.
+- Reuse → extend → compose → refactor → create. Confirm the thing exists on this base.
+- The API contract: `docs/_shared/api-contract.md` to find your way, the code to confirm —
+  backend `fk-admin-panel-be/src/typedefs/*.typedef.js`
+  (merged in `index.js`), `src/resolvers/`, permissions in `src/configs/shield.js` and
+  `src/utils/permissions/`; client operations in `fk-admin-panel-fe/src/graphql/` and
+  `fk-mobile/src/graphql/`. Migrations: `fk-admin-panel-be/db/migrations/`.
+- When writing a repo's code, load its standards skill (`backend-standards`,
+  `frontend-standards`, `mobile-standards`) and nothing else, plus `graphql-contract` when
+  the change crosses the API.
 
 ## 7. Stop conditions
 
-Set `blocked:` in the sidecar, report, and stop — rather than working around it — when:
+Set `blocked:`, report, and stop — never work around it — when:
 
-- the ticket is ambiguous in a way that changes what gets built;
-- something the ticket needs is absent from the base branch;
-- a requirement contradicts the codebase;
-- the Jira issue changed materially mid-flight (`FRESHNESS.md` §1);
-- the base branch moved and the rebase conflicts (`FRESHNESS.md` §2);
-- a repo in scope has a worktree with changes that are not this ticket's;
-- the **same** check fails twice — a third attempt is guessing.
+- the ticket is ambiguous in a way that changes what gets built, or an image contradicts
+  the text, or an illegible region would change the build;
+- the ticket was delivered already, or its status is at or past `In Code Review`;
+- the Jira issue changed mid-flight (FRESHNESS §1);
+- something the ticket needs is absent from the base, or a requirement contradicts the code;
+- the base moved and `sync` conflicts, or the base moved during `/implement-review`
+  (FRESHNESS §2);
+- a freshness check says `UNKNOWN`;
+- a tree holds changes that are not this ticket's;
+- the same check fails twice, or a finding stands after the fix round.
 
-Never stash, reset, checkout over, or discard anything in the user's checkouts. There is
-nothing to work around there: this workflow does not touch them.
+Never stash, reset, check out over or discard anything in a user's checkout.
 
 ## 8. Handover
 
-Report in the sidecar's vocabulary — do not invent a second one. `IMPLEMENTED` is code
-written and nothing more. `VERIFIED` means the applicable checks ran and passed, with their
-output recorded. `REVIEWED` means the reviewer returned PASS, or its blocking findings are
-fixed and re-validated. "Done" is never `IMPLEMENTED`.
+Only after `VERDICT: PASS`, in `/implement-review`. Per repo, inside the tree:
 
-Handover belongs to `/implement-review`, after the reviewer returns PASS. Per repo: re-check
-freshness, then **commit inside the worktree** — one commit, conventional one-line subject,
-no body. Nothing to commit, because the dev already committed their own tweaks, is a normal
-outcome: say so and do not amend their commit. Do not push, do not open a PR, do not
-transition the Jira issue: those are the user's call. Report the branch and the exact command
-they would run to push it.
+- stage **by explicit path** — never `git add -A`, `git add .` or `git commit -a`; in-place,
+  anything in `git status` that is not this ticket's is a stop;
+- **one commit**, one-line conventional subject, no body, no trailer; the branch and commit
+  number follow the branch name (WORKTREE §1), not the Jira key;
+- use a literal `git -C <tree> ...`; a denied commit inside a tree is a bug to report, never
+  a reason for `--no-verify`;
+- nothing to commit (the dev already committed) is normal: say so, never amend their commit.
 
-Say the push line whenever the work may outlive the day. `.work/<KEY>/` never leaves this
-machine, so an unpushed branch plus an absent dev is how one ticket gets implemented twice.
+Never push, open a PR or change the Jira issue here. Those go through `/create-pr` and its
+own approval gate.
 
-The branch leaves the machine through `/create-pr` (the `pull-request` skill) and its own
-approval gate — never from here. It sets `state: PR_OPEN` when the PR is open, and writes the
-ticket's delivery comment, which is what makes the work visible to anyone else.
+Report in the state vocabulary above, never "done". The report and the `## Handover`
+section carry: files changed per repo with branch and tree path; checks run and their result
+plus what was **not** run and why; what a human must still verify, named; for a cross-repo
+change, the merge order (backend first) and one PR per repo; anything blocked.
 
-Last sidecar section, and the reply to the user:
+Say the push line whenever the work may outlive the day:
 
-- files changed per repo, with the branch and worktree path;
-- checks run and their result, verbatim where it matters, plus what was **not** run and why;
-- what still needs manual verification, named specifically;
-- for a cross-repo change: the required merge order (backend first) and one PR per repo;
-- anything left blocked or out of scope.
+> This ticket lives only on this machine: the branch is local and `.work/<KEY>/` is never
+> committed. If anyone else may pick it up, push it: `git -C <tree> push -u origin <branch>`
 
 Details: [`WORKTREE.md`](./WORKTREE.md) · [`FRESHNESS.md`](./FRESHNESS.md) · [`VALIDATION.md`](./VALIDATION.md)
