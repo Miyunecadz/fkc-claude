@@ -8,6 +8,8 @@ it and pass it as `description` to `mcp__jira__jira_create_issue` (`JIRA.md` §4
 - Text in `[brackets]` is instruction. Replace it; never send it.
 - No `## Description` heading — in Jira this whole body *is* the description.
 - How much each section holds depends on the tier (`TRIAGE.md` §3).
+- A `Bug` uses the same sections, with the bug lines below inside them — not new headings.
+- Write for Jira's converter (`JIRA.md` §3): no HTML, other-site keys as explicit links.
 
 The first seven sections are the build brief. A developer or an agent builds from them
 without the conversation. Anything they would have to guess is a gap in the ticket. The
@@ -21,12 +23,31 @@ last four are the team's fixed sections.
 the outcome is stated so anyone could tell it worked (the success measure). T3: stated as a
 problem, not a solution. No design.]
 
+[Bug only — replace the sentences above with these lines, filled:]
+
+- **Actual:** [what happens today, in the words the user would use]
+- **Expected:** [what should happen instead]
+- **Where seen:** [environment (Staging / Production), app (web admin / mobile, with
+platform), the user's role, and a date or version when known]
+
+Steps to reproduce:
+
+1. [From a named page or screen, as the named role — each step one action]
+2. [The last step is the one where the actual result appears]
+
+[Steps come from the PO or the screenshots. Steps you worked out from the code are
+`CODEBASE` and say so: "(worked out from the code at `<branch>`, not yet reproduced)".
+Intermittent → say how often, never invent a reliable repro.]
+
 ## Acceptance criteria
 
 1. [One observable outcome per line: who does what, where, and what they then see. Each
    passes or fails on its own, by hand, from this ticket alone.]
 2. [Edge cases get their own line — empty state, no permission, invalid input, the boundary
    value. "Works correctly" or "is user-friendly" cannot fail, so it is not a criterion.]
+
+[Bug: criterion 1 is the steps to reproduce giving the expected result. Add a line for
+each nearby behaviour that must stay as it is today — the regression check QA runs.]
 
 ## Decisions already made
 
@@ -78,8 +99,10 @@ one — e.g. "Where web and mobile differ, follow web." Never loosen the default
 *Insert images here.
 
 [No screenshots supplied: keep the line above verbatim. Supplied: replace it with one line
-per screenshot saying what it establishes — e.g. "Screenshot 1 — Employees list, Active
-filter applied, showing the columns to be exported." The requester attaches the files.]
+per screenshot saying what it establishes, and the file name when there is one — e.g.
+"Screenshot 1 (`employees-active.png`, attached) — Employees list, Active filter applied,
+showing the columns to be exported." A pasted screenshot with no file: "Screenshot 2
+(pasted, attached by hand) — …". The name lets a reader match the line to the attachment.]
 
 ## Affected System(s)
 

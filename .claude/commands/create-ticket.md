@@ -17,8 +17,9 @@ implement the request.
 
 **Screenshots.**
 
-- **File paths** in the request or conversation — pass them through verbatim.
-- Images **pasted inline** — the agent cannot see them. Read each one and pass a factual
+- **File paths** in the request or conversation — pass them through verbatim, as absolute
+  paths. The agent attaches these files to the issue.
+- Images **pasted inline** — the agent cannot see them, and there is no file to attach. Read each one and pass a factual
   inventory with the request: page and title, section, tab, field labels and values,
   required markers, controls, table columns in order, filters, sorts, states, dates and
   formats, annotations. Only what is readable; anything cropped or blurry is
@@ -49,13 +50,14 @@ yet**, with numbered questions (and, at gate B, the draft).
 Relay its report as-is. Do not reproduce the ticket body unless asked, and never state a
 Jira link the agent did not report.
 
-- **Ticket raised** — relay the key and link, and the line telling the user to attach the
-  screenshots (the MCP server cannot upload files).
+- **Ticket raised** or **Ticket updated** — relay the key and link, and the attachment
+  line as the agent gave it (which files were attached, which to attach by hand).
 - **Not raised — requirement not sufficiently defined** — relay the open questions
   verbatim and stop. Do not ask the agent to raise it anyway. When the user answers,
   resume the same agent with `SendMessage` as above.
 - **Not raised — this already exists** — relay the evidence and options. The choice is the
-  user's.
+  user's. If they choose to extend the existing issue, resume the same agent with that
+  choice.
 - **Jira not reachable** — relay it and stop. No other Jira server, no local file.
 
 The Jira issue is the ticket: never write a local copy, even if asked (`ticket-writing`

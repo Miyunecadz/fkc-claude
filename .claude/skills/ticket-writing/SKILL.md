@@ -1,6 +1,6 @@
 ---
 name: ticket-writing
-description: Turn raw Product Owner input — text, chat, screenshots — into a build-brief ticket (goal, numbered acceptance criteria, decisions already made, out of scope, files to touch, a real pattern to follow) and raise it in Jira through the project `jira` MCP server. Use whenever asked to write, draft, raise, log or create a ticket, issue, bug or task, especially with screenshots or a vague request. Never implements; never saves a local file.
+description: Turn raw Product Owner input — text, chat, screenshots — into a build-brief ticket (goal, numbered acceptance criteria, decisions already made, out of scope, files to touch, a real pattern to follow) and raise it in Jira through the project `jira` MCP server, with the screenshots attached. Also extends an existing FKC issue with new or changed requirements. Use whenever asked to write, draft, raise, log or create a ticket, issue, bug or task, or to add to, amend or extend an existing ticket, especially with screenshots or a vague request. Never implements; never saves a local file.
 ---
 
 # Ticket writing (Jira)
@@ -14,7 +14,8 @@ get wrong, with its answer) and **Out of scope** (every neighbouring change rule
 name — unlisted means "maybe", and "maybe" gets built). The rest points at the code. The
 ticket never designs the solution: no new function names, no schema, no approach.
 
-**Never implement the requested change.** This skill ends at a created Jira issue.
+**Never implement the requested change.** This skill ends at a created Jira issue, or an
+existing one extended ([`UPDATE.md`](UPDATE.md)).
 
 ## 0. Three skills do the thinking; this one writes the ticket
 
@@ -52,7 +53,9 @@ Project key and every call: [`JIRA.md`](JIRA.md).
 
 [`TRIAGE.md`](TRIAGE.md) owns the order (its §0), the duplicate check, the existence
 verdict and the tier. A duplicate or `ALREADY_IMPLEMENTED` ends the workflow with the
-"already exists" report (§10). `CODEBASE` claims mean code read **at the branch for the
+"already exists" report (§10). If the requester then chooses to extend the existing issue,
+or asked to amend a named issue from the start, follow [`UPDATE.md`](UPDATE.md) instead of
+§7–§10. `CODEBASE` claims mean code read **at the branch for the
 affected environment**, not whatever is checked out.
 
 ## 3. Evidence → sections
@@ -73,11 +76,19 @@ priority and assignee are set only when the requester stated them or the project
 metadata provides them (`JIRA.md` §4). An inferred value is an `INFERENCE` with a field name
 on it, and it stays out.
 
-## 4. Screenshots — one Jira limit
+## 4. Screenshots — attach what has a file
 
-The MCP server **cannot upload attachments**. So `Images` carries one line per screenshot
-from the inventory (`TEMPLATE.md`), and the report tells the requester to attach the files
-(§10). Never imply they were attached.
+The server attaches files to an issue through `jira_update_issue`'s `attachments` input
+(`JIRA.md` §5). It can only upload a file that exists on this machine, so:
+
+- **A screenshot with a file path** — attach it to the issue straight after creating it.
+- **A screenshot pasted inline** that arrived only as a caller's written inventory — there
+  is no file to upload. It is still evidence (`VISUAL`, for what the inventory records),
+  but the requester attaches it by hand, and the report says so (§10).
+
+Either way `Images` carries one line per screenshot (`TEMPLATE.md`), so the ticket reads
+the same whichever way the file arrives. Say a file is attached only when the read-back's
+`attachment` field lists it.
 
 ## 5. Language
 
@@ -104,8 +115,14 @@ The gate is the evidence skill's (§6–§9 there): `BLOCKED` means no issue at 
 ## 7. The ticket itself
 
 **Summary** — one line, the change in the product's own words. No trailing full stop, no
-issue key, no "As a user". Match a clear convention in the issues the duplicate search
-returned (`JIRA.md` §2); none → this rule.
+issue key, no "As a user". Jira refuses more than 255 characters; aim for under 100, so it
+reads in a board card. Detail goes in the description, not the summary. Match a clear
+convention in the issues the duplicate search returned (`JIRA.md` §2); none → this rule.
+
+**Issue type** sets the shape inside the sections. A `Bug` carries actual behaviour,
+expected behaviour, where it was seen and steps to reproduce (`TEMPLATE.md`, "Bug"). A bug
+report with no way to see the fault — no steps, no page, no environment — has a material
+gap: ask before creating.
 
 **Description** — [`TEMPLATE.md`](TEMPLATE.md), exactly. It owns every section, its order,
 its fixed lines and what goes in it. The tier sets how much goes in each (`TRIAGE.md` §3).
@@ -115,7 +132,8 @@ prose, no padding.
 ## 8. Gate B — confirm, then create
 
 Creating an issue is outward-facing and deleting one is not a clean undo. Before the create
-call, show the assembled summary and the seven brief sections and ask once:
+call, show the assembled summary, the issue type, the seven brief sections and the files
+that will be attached, and ask once:
 
 > Raise this in Jira as written? (Yes, create it / No, and here is what is wrong)
 
@@ -123,8 +141,9 @@ Corrections are `EXPLICIT` evidence: fold them in and ask again. Nothing is crea
 the answer is yes. No question tool (a subagent) → hand the draft and this question to the
 caller, and create only when resumed with a yes.
 
-Then create per `JIRA.md` §4 — one issue, read back. Do not transition, assign, comment on
-or add watchers to it; it stays in the project's default status.
+Then create per `JIRA.md` §4 — one issue — attach the screenshot files per `JIRA.md` §5,
+and read it back. Do not transition, assign, comment on or add watchers to it; it stays in
+the project's default status.
 
 ## 9. Validation — all pass before the create call
 
@@ -146,6 +165,9 @@ Local:
 - **Paths**: every path in the two technical sections was opened at the named branch.
 - **Language**: no design detail outside the two technical sections, none prescribed in them.
 - **Fixed sections**: ticks, `SEVERITY` and `TIME ESTIMATE` per `TEMPLATE.md` evidence rules.
+- **Summary**: 255 characters at most; no key, no full stop.
+- **Bug**: a `Bug` has actual, expected, where seen and steps (`TEMPLATE.md`).
+- **Jira text**: `JIRA.md` §3 — other-site keys as explicit links, no HTML, no comments.
 - **Jira fields**: key from `.mcp.json`; type exists; every field and value allowed.
 - **Confirmed**: gate B answered yes (§8).
 
@@ -163,8 +185,13 @@ Type:    <issue type> · tier <T1|T2|T3> · severity <value or "not set">
 Summary: <one-line summary of the requirement>
 ```
 
-Screenshots supplied → add: `Attach the <n> screenshot(s) to <KEY> — the MCP server cannot
-upload them.` Do not reproduce the body unless asked. Never state a link Jira did not return.
+Screenshots supplied → add the line that is true:
+
+- all attached: `Attached: <n> screenshot(s) — <file names>.`
+- some or none had a file, or an upload failed: `Attach <file names or "the <n> pasted
+  screenshot(s)"> to <KEY> by hand — <no file on this machine | upload failed: <reason>>.`
+
+Do not reproduce the body unless asked. Never state a link Jira did not return.
 
 Gate `BLOCKED` → the evidence skill's §9 report, first line `No ticket raised — requirement
 not sufficiently defined.`
@@ -179,7 +206,10 @@ Evidence:
 
 State: ALREADY_IMPLEMENTED | DUPLICATE_OF <KEY>   (or PARTIALLY_IMPLEMENTED, with what remains)
 
-Options: close it, or reframe it as <the specific change that would still be needed>.
+Options: close it, extend <KEY> with this change (`UPDATE.md`), or reframe it as <the
+specific change that would still be needed>.
 ```
 
 Which option to take is the requester's call, never yours.
+
+Extended an existing issue → the report in `UPDATE.md` §6.

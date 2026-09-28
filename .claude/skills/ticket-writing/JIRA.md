@@ -1,7 +1,8 @@
 # Jira mechanics — the project server only
 
-This file owns the call order, the JQL and the create mechanics. Every call uses the
-`jira` MCP server (`mcp__jira__*`) and nothing else (SKILL.md §1).
+This file owns the call order, the JQL, how text survives the trip into Jira, and the
+create, attach and update mechanics. Every call uses the `jira` MCP server
+(`mcp__jira__*`) and nothing else (SKILL.md §1).
 
 ## 1. Resolve the target project — from config, not memory
 
@@ -28,14 +29,37 @@ mcp__jira__jira_search { jql: "project = <KEY> AND statusCategory != Done AND te
   Otherwise follow SKILL.md §7. Never copy a convention, or a label, from one sample.
   There is no separate house-style search.
 
-## 3. Project facts — still discover at runtime
+## 3. Writing text that survives Jira
+
+`FKC` is on Jira Cloud. The server turns the Markdown `description` into Jira's own
+document format (ADF). Checked against the server's converter:
+
+| You write | Jira shows |
+|---|---|
+| `##` headings, `**bold**`, numbered and bullet lists, tables, inline code | the same, intact |
+| `[text](https://…)` | a link |
+| a bare `FKC-21` | a link to FKC-21 on this site — fine for this project's keys |
+| a list made **only** of `- [ ]` / `- [x]` lines | real Jira checkboxes, `[x]` ticked — as in `Affected System(s)` |
+| a `- [ ]` line inside an ordinary bullet list | plain text starting `[ ]` — keep checkbox lists separate |
+| `[ ]` inside a sentence (`MERGED TO STAGE: [ ]`) | literal text — expected, leave it |
+| HTML, `<!-- comments -->` | stripped or mangled — never use |
+
+- **Keys from another Jira site get an explicit link.** A bare `SUBC-18` in an FKC issue
+  links to this site, where it does not exist. Write
+  `[SUBC-18](https://247crm.atlassian.net/browse/SUBC-18)`, in headings too.
+- **Comments are not descriptions.** Bracket and `#` damage seen in comments came from the
+  comment path; this skill does not comment.
+- The read-back (§4) shows the stored text converted back to Markdown. Judge it by content
+  — sections present, lines intact — not by exact characters.
+
+## 4. Discover the fields, then create — one call
+
+Project facts — still check at runtime:
 
 - `FKC` is a team-managed Jira Cloud project. `Module` is its epic-level container: link
   with `{"parent": "FKC-<n>"}`, not `epicKey`, and only when the requester named the module.
 - `jira_search` and `jira_get_issue` return `browse_url` per issue. That is the link to
   report; never build one by hand.
-
-## 4. Discover the fields, then create — one call
 
 ```
 mcp__jira__jira_get_project_issue_types { project_key: "<KEY>" }
@@ -57,25 +81,49 @@ mcp__jira__jira_get_field_options       { ... }   # only when a field needs its 
 ```
 mcp__jira__jira_create_issue {
   project_key: "<KEY>",
-  summary:     "<one line, SKILL.md §7>",
+  summary:     "<one line, 255 characters at most, SKILL.md §7>",
   issue_type:  "<discovered type name>",
-  description: "<TEMPLATE.md, filled, Markdown>",
+  description: "<TEMPLATE.md, filled, Markdown per §3>",
+  components:  "<comma-separated names — only when the requester named them and they exist>",
   additional_fields: "<JSON string — only what the requester gave>"
 }
 ```
 
-- `description` is Markdown; the server converts it. `##` headings and `- [ ]` boxes
-  survive. No HTML.
 - `additional_fields` is a **JSON string**, not an object: `{"priority": {"name": "High"}}`,
   `{"labels": ["..."]}`, `{"parent": "FKC-123"}`.
 
-Then read it back and check the sections rendered intact and the fields hold what you sent:
+Then attach (§5), and read it back once, after both:
 
 ```
-mcp__jira__jira_get_issue { issue_key: "<KEY>-<n>", fields: "summary,issuetype,description,priority,labels,status" }
+mcp__jira__jira_get_issue { issue_key: "<KEY>-<n>", fields: "summary,issuetype,description,priority,labels,status,attachment", comment_limit: 0 }
 ```
 
-## 5. Failure modes
+Check the sections rendered intact, the fields hold what you sent, and every file you
+uploaded appears in `attachment`.
+
+## 5. Attach the screenshots
+
+Only for screenshots that arrived as file paths (SKILL.md §4). One call, all files:
+
+```
+mcp__jira__jira_update_issue {
+  issue_key:     "<KEY>-<n>",
+  fields:        "{}",
+  attachments:   "[\"/abs/path/one.png\", \"/abs/path/two.png\"]",
+  return_fields: "attachment"
+}
+```
+
+- **Absolute paths.** The server runs in its own process; a relative path may not resolve.
+  Check each file exists before the call.
+- `fields` is required; `"{}"` changes nothing else. Never send a field here — this call
+  attaches, it does not edit.
+- Result has `attachment_results`. A file that failed is named in the report as one to
+  attach by hand, with the reason. Do not retry more than once.
+- This is the only use of `jira_update_issue` on a new issue. Editing an existing issue's
+  description is `UPDATE.md`.
+
+## 6. Failure modes
 
 | Symptom | Do this |
 |---|---|
@@ -83,10 +131,13 @@ mcp__jira__jira_get_issue { issue_key: "<KEY>-<n>", fields: "summary,issuetype,d
 | Auth / 401 / 403 | Stop and report it. Credentials live in the server's env file — do not read it or work round it |
 | Create errored, unclear whether it landed | Search first: `project = <KEY> AND summary ~ "<summary>" ORDER BY created DESC`. Create again only if nothing came back |
 | Field rejected, or value not allowed | Re-read `jira_get_create_fields` / `jira_get_field_options` and drop the field rather than force it |
-| Screenshots to attach | Cannot be done — the server only downloads attachments. Say so in the report |
+| Summary rejected as too long | Shorten it — detail belongs in the description |
+| Attachment upload failed | The issue stands. Report the file as one to attach by hand, with the error line |
+| Screenshot with no file (pasted inline) | Cannot be uploaded. Report it as one to attach by hand |
 | Requester asks for a local copy | Offer the key and link, or paste the body in chat — SKILL.md §1 |
 
-## 6. Out of scope
+## 7. Out of scope
 
-Transitioning, assigning, commenting, watchers, estimating, sprints, hierarchy edits,
-deleting, and any other project. Raising the issue is where this stops.
+Transitioning, assigning, commenting, watchers, issue links, estimating, sprints,
+hierarchy edits, deleting, and any other project. Raising the issue, attaching its
+screenshots, and extending an existing issue (`UPDATE.md`) are where this stops.

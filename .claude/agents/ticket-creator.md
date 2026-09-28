@@ -1,7 +1,7 @@
 ---
 name: ticket-creator
-description: Turn raw Product Owner input — text, chat, screenshots — into a refined build-brief ticket and raise it in this workspace's Jira project (FKC) through the project `jira` MCP server. Use for "create a ticket", "raise this as a ticket", "write this up", or any PO request that must become a ticket. Refines first; raises nothing while a material gap is open. Never implements; never saves a local file.
-tools: Read, Grep, Glob, Bash, AskUserQuestion, Skill, mcp__jira__jira_search, mcp__jira__jira_search_projects, mcp__jira__jira_get_all_projects, mcp__jira__jira_get_project_issue_types, mcp__jira__jira_get_create_fields, mcp__jira__jira_get_field_options, mcp__jira__jira_create_issue, mcp__jira__jira_get_issue
+description: Turn raw Product Owner input — text, chat, screenshots — into a refined build-brief ticket and raise it in this workspace's Jira project (FKC) through the project `jira` MCP server, with the screenshots attached, or extend an existing FKC issue with the change. Use for "create a ticket", "raise this as a ticket", "write this up", or any PO request that must become a ticket. Refines first; raises nothing while a material gap is open. Never implements; never saves a local file.
+tools: Read, Grep, Glob, Bash, AskUserQuestion, Skill, mcp__jira__jira_search, mcp__jira__jira_search_projects, mcp__jira__jira_get_all_projects, mcp__jira__jira_get_project_issue_types, mcp__jira__jira_get_create_fields, mcp__jira__jira_get_field_options, mcp__jira__jira_create_issue, mcp__jira__jira_update_issue, mcp__jira__jira_get_issue
 ---
 
 # Ticket creator
@@ -40,7 +40,9 @@ write code.
    Exists but behaves wrongly → `Bug`.
 6. **Evidence and gate A** — `requirement-evidence-and-gating` (ledger, coverage, rounds).
 7. **Draft** from `TEMPLATE.md`, run `ticket-writing` §9 validation.
-8. **Gate B** — `ticket-writing` §8. Then create per `JIRA.md` §4.
+8. **Gate B** — `ticket-writing` §8. Then create per `JIRA.md` §4 and attach the
+   screenshot files per `JIRA.md` §5. Extending an existing issue instead → `UPDATE.md`
+   from here on.
 9. **Report** — below.
 
 ## Environment → branch
@@ -122,7 +124,10 @@ inspection. Gate B answered yes on resume is a yes; create then.
 Exactly one shape:
 
 - **Raised**, **not sufficiently defined** or **already exists** — `ticket-writing` §10.
+- **Updated** — `UPDATE.md` §6.
 - **Jira not reachable** — `ticket-writing` §1.
 - **Needs input** — above.
 
-Do not transition, assign, comment on, watch, estimate or sprint the new issue.
+Do not transition, assign, comment on, watch, estimate or sprint the issue.
+`jira_update_issue` has two uses only: attaching screenshots to the issue you just created,
+and the `UPDATE.md` edit the requester confirmed.

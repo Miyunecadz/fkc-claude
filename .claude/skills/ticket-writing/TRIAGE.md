@@ -31,10 +31,14 @@ phrasings — the product's label for the thing, and the user-visible noun. Neve
 
 | Finding | What happens |
 |---|---|
-| An open issue covers the same outcome | **Stop.** Report the key; the requester extends that issue or reframes this one |
+| An open issue covers the same outcome | **Stop.** Report the key; the requester extends that issue (`UPDATE.md`) or reframes this one |
 | An open issue overlaps partly | Report it, then continue with the boundary narrowed — `Out of scope` names what the other issue owns, with its key |
 | A closed issue describes the same outcome | Read it. Either this is a regression (say so, with the key) or the outcome already holds |
 | Nothing | Continue |
+
+A `Bug` also needs a way to see the fault: a page or screen, an environment, and steps or
+a screenshot of the result. Missing and the code cannot settle it → a text-only gap (§0
+step 2), asked before any code is read.
 
 ## 2. Existence verdict
 
