@@ -4,6 +4,7 @@
 !/CLAUDE.md
 !/.claude/
 !/.lodestar/
+!/.github/
 
 # Agent worktrees live under .claude/ but are checkouts, not setup. `!/.claude/` above
 # un-ignores everything beneath it, so without this a `git add -A` on the default branch
