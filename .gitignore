@@ -17,3 +17,4 @@ __pycache__/
 # skill-creator run output (answers, grades, viewer, skill snapshot). Test sets live in
 # the skill's own evals/ folder; a run is scratch and goes stale on the next edit.
 .claude/skills/*-workspace/
+.claude/*-tests
