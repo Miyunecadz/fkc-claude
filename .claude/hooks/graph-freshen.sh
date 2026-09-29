@@ -18,5 +18,8 @@ if [ -n "$stale" ]; then
   "$HOOKS/graph.sh" refresh --background
   echo "Architecture maps rebuilding in the background (was stale: $(echo "$stale" | paste -sd ';' -))."
 fi
+# Ticket commands delegate all code reading to their agents (ticket-delivery §5), which
+# query the map themselves; a "query it yourself" hint would pull the main thread off that.
+grep -qiE '^\s*/(implement-ticket|implement-review|create-pr|create-ticket)\b' <<<"$prompt" && exit 0
 echo "Code task: locate with \`.claude/hooks/graph.sh query <repo-or-worktree> \"<question>\"\` before grep; confirm at path:line."
 exit 0
