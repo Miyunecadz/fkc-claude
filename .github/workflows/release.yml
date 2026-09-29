@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag, for example v1.2.0"
+        required: true
+        type: string
+      branch:
+        description: "Branch to release from"
+        required: true
+        default: main
+        type: string
+      notes:
+        description: "Release notes. Leave empty to generate them from merged PRs."
+        required: false
+        type: string
+      prerelease:
+        description: "Mark as a pre-release"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+      BRANCH: ${{ inputs.branch }}
+      NOTES: ${{ inputs.notes }}
+      PRERELEASE: ${{ inputs.prerelease }}
+    steps:
+      - name: Check out the branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+
+      - name: Check the tag is free
+        run: |
+          if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            echo "::error::Tag $VERSION already exists."
+            exit 1
+          fi
+
+      - name: Create the release
+        run: |
+          args=(--target "$BRANCH" --title "$VERSION")
+
+          if [ -n "$NOTES" ]; then
+            printf '%s\n' "$NOTES" > notes.md
+            args+=(--notes-file notes.md)
+          else
+            args+=(--generate-notes)
+          fi
+
+          if [ "$PRERELEASE" = "true" ]; then
+            args+=(--prerelease)
+          fi
+
+          gh release create "$VERSION" "${args[@]}"
+
+      - name: Summary
+        run: |
+          echo "Released [$VERSION](${{ github.server_url }}/${{ github.repository }}/releases/tag/$VERSION) from \`$BRANCH\`." >> "$GITHUB_STEP_SUMMARY"
