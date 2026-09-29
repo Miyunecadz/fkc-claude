@@ -1,0 +1,62 @@
+{
+  "skill_name": "ticket-delivery",
+  "evals": [
+    {
+      "id": 0,
+      "name": "review-failed-after-hand-fix",
+      "prompt": "The user types: \"/implement-review FKC-41 \u2014 I fixed the reviewer's findings by hand, carry on.\"\n\nThe sidecar .work/FKC-41/work.md reads:\n```\n# Work \u2014 FKC-41\nticket:   FKC-41 \u2014 Add export button to subcontract orders\njira:     updated=2026-09-28T09:12:44.000+0800 status=In Progress\nstate:    REVIEW_FAILED\nblocked:  -\nrepos:    fk-admin-panel-fe@feat/FKC-278-subcontract-export from staging@b33bcade (worktree)\ngraph:    fk-admin-panel-fe=worktree-update@b33bcade\n## Plan \u2014 2026-09-28   (export button on SubcontractOrders grid, CSV named subcontract-orders-<date>.csv)\n## Approval \u2014 2026-09-28  \"approved, go\"\n## Implement \u2014 2026-09-28  CHANGED src/pages/SubcontractOrders/index.jsx\n## Validate \u2014 2026-09-28  yarn lint exit 0; yarn build exit 0; verdict VERIFIED\n## Review \u2014 2026-09-28  VERDICT FAIL; AC3 FAIL: export filename has no date; report .work/FKC-41/review/1.md\n## Log\n```\nTool results you would get:\n- Jira re-read of FKC-41: updated=2026-09-28T09:12:44.000+0800, status In Progress, no new comments.\n- `.claude/hooks/ticket-freshness.sh check FKC-41` \u2192 exit 0, FRESH.",
+      "expected_output": "Continue with /implement-review: Jira and git unchanged, so re-validate, then re-review (round 2) with change-reviewer in gate mode given paths only; no implementer; commit only on PASS, by explicit path, one-line message, no push.",
+      "files": [],
+      "assertions": [
+        "Runs validation again (ticket-validator) before the second review, rather than going straight to review",
+        "Dispatches change-reviewer in mode gate, round 2, passing paths/keys only rather than diffs or file contents",
+        "Does not dispatch an implementer or edit any source file itself",
+        "Does not read source files or the diff in the main thread",
+        "On PASS, commits by explicit path with a one-line conventional message and does not push or open a PR"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "jira-moved-and-stale-base",
+      "prompt": "The user types: \"/implement-review FKC-55\".\n\nThe sidecar .work/FKC-55/work.md header reads:\n```\nticket:   FKC-55 \u2014 Payslip total excludes overtime\njira:     updated=2026-09-27T10:00:12.000+0800 status=In Progress\nstate:    IMPLEMENTED\nblocked:  -\nrepos:    fk-admin-panel-be@fix/FKC-301-payslip-overtime from staging@6740b14 (in-place)\n```\nThe dev has uncommitted hand edits in fk-admin-panel-be on the ticket branch.\n\nTool results you would get:\n- Jira re-read of FKC-55: updated=2026-09-29T08:30:05.000+0800, status In Progress. Newest comment is dated 2026-09-28T16:02:00.000+0800 and says \"looks good so far\".\n- `.claude/hooks/ticket-freshness.sh check FKC-55` \u2192 exit 3, STALE BASE (origin/staging is 3 commits ahead of BASE_SHA).",
+      "expected_output": "Stop at entry. Jira: updated moved for another reason, so report old and new updated and ask whether the requirement changed, without re-recording the fingerprint. Git: stale base during /implement-review is a stop-and-ask, never sync (dirty tree, would change what the human read). Record blocked; no validation yet.",
+      "files": [],
+      "assertions": [
+        "Stops before running any validation or review",
+        "Reports both the old and the new Jira updated values and asks the user whether the requirement changed",
+        "Does not overwrite the recorded Jira fingerprint before the user confirms",
+        "Does not run ticket-freshness.sh sync, git rebase, stash or any command that changes the dev's tree",
+        "Records the stop with the blocked flag (sidecar state FKC-55 BLOCKED ...) rather than changing state:"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "mobile-only-validation",
+      "prompt": "The user types: \"/implement-review FKC-60\".\n\nFKC-60 changes fk-mobile only (a label on the job details screen). The sidecar state is IMPLEMENTED, blocked is -. The Jira re-read and `ticket-freshness.sh check` both come back unchanged/FRESH.\n\nThe ticket-validator for fk-mobile returns:\n```\nfk-mobile: yarn lint NOT RUN \u2014 no node_modules\nfk-mobile: yarn test NOT RUN \u2014 no node_modules\nverdict: INCONCLUSIVE\n```\nWhile you are reporting this, the user says: \"just run yarn install in the mobile tree so lint can run\".",
+      "expected_output": "State UNVERIFIED, never VERIFIED. Decline yarn install (the write lands in the user's checkout; dependency changes are the user's to make). Tell the user 'UNVERIFIED \u2014 no automated check covered this change' with a named manual check list. Review still runs.",
+      "files": [],
+      "assertions": [
+        "Records the sidecar state as UNVERIFIED (not VERIFIED, not FAILED_VERIFICATION)",
+        "Declines to run yarn install (or npm i) and gives the reason that it writes into the user's checkout / is the user's call",
+        "Still dispatches the change-reviewer after validation",
+        "Tells the user plainly that no automated check covered the change and names manual checks (e.g. the job details screen)",
+        "Does not run npx eslint or invent another check command"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "new-ticket-no-trello-no-mode",
+      "prompt": "The user types: \"/implement-ticket FKC-88\".\n\nThere is no .work/FKC-88/ yet. The Jira issue FKC-88 reads: summary \"Show package document fields on the mobile job screen\", status To Do. The description says the backend must expose the package's document fields on the job query and the mobile job screen must show them. No Trello card is linked anywhere in the issue. No image attachments.\n`git -C <repo> branch -a --list \"*FKC-88*\"` returns nothing in all three repos. `git -C fk-admin-panel-be branch -r` lists origin/master, origin/staging, origin/development and some feature branches.\n\nDescribe everything you would do from now up to and including preparing the trees, and what you ask the user along the way.",
+      "expected_output": "Read issue in full, record fingerprint; scope be + mobile; ask the user to choose worktree or in-place (never choose); ask for the Trello number since the branch is <type>/FKC-<trello>-<kebab> and must not come from the Jira key; base staging by default; then prepare via ticket-worktree.sh; later backend first with a pinned contract; nothing edited before plan approval.",
+      "files": [],
+      "assertions": [
+        "Asks the user to choose between worktree and in-place mode rather than choosing itself",
+        "Asks the user for the Trello card number and does not name the branch from the Jira key FKC-88",
+        "Uses a branch pattern like <type>/FKC-<trello-number>-<kebab-summary>",
+        "Chooses staging as the base (not master, not development)",
+        "Prepares trees through ticket-worktree.sh prepare rather than git worktree add or git checkout by hand",
+        "States that nothing is edited before the plan is approved and that the backend contract is pinned before mobile work"
+      ]
+    }
+  ]
+}
