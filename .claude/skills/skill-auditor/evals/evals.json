@@ -1,0 +1,71 @@
+{
+  "skill_name": "skill-auditor",
+  "evals": [
+    {
+      "id": 1,
+      "name": "audit-flawed-skill",
+      "prompt": "can you audit the skill at SKILL_DIR? it keeps firing when I just ask for a commit message. What I want it to do: draft a pull request title and description from the current branch's diff against its base. It should trigger when I ask for a PR description or PR title. It should not trigger for commit messages or code review. Output: a title under 72 characters and a body of at most five bullets, in chat. That is my confirmed intent, no need to ask me again. Just report, don't change anything.",
+      "expected_output": "NEEDS CHANGES verdict; flags broad trigger, missing assets/pr-template.md, unused scripts/old_helper.py, vague phrases, five-bullets vs every-file contradiction; exact before/after fixes; 3-5 test prompts incl. a should-not-trigger; no files changed.",
+      "files": [
+        "fixtures/pr-notes"
+      ],
+      "assertions": [
+        "Verdict is NEEDS CHANGES or REJECTED",
+        "Flags missing assets/pr-template.md",
+        "Flags unused scripts/old_helper.py",
+        "Flags over-broad 'any git writing task' trigger",
+        "Flags vague phrases ('as needed' / 'appropriately')",
+        "Flags five-bullets vs every-changed-file contradiction",
+        "Fixes give exact before/after text",
+        "Includes a should-not-trigger test prompt",
+        "Fixture left unchanged (report only)"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "approve-clean-skill",
+      "prompt": "please review the skill at SKILL_DIR before I ship it. Intent (confirmed): it adds exactly one entry to CHANGELOG.md under Unreleased in Keep a Changelog format from a change I describe. Triggers when I ask to add/log a change in the changelog or say 'changelog this'. Not for whole-version release notes or commit messages. Output: the one added line and its section, shown to me. Report only.",
+      "expected_output": "APPROVED or at worst NEEDS CHANGES with only real, evidenced issues; all ten checklist items with evidence; no invented features in fixes.",
+      "files": [
+        "fixtures/changelog-entry"
+      ],
+      "assertions": [
+        "Explicit verdict consistent with its own checklist (FAIL present iff not APPROVED)",
+        "Catches missing Deprecated/Security types (real gap vs Keep a Changelog)",
+        "All ten checklist items reported",
+        "Fixture left unchanged"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "agent-file-not-a-skill",
+      "prompt": "audit this skill for me: /mnt/e/projects/247tech/fk-connect/.claude/agents/ticket-analyst.md \u2014 I want to know if it's any good",
+      "expected_output": "Recognises a subagent file, not a skill; BLOCKED with pointer to agent-creator; does not run the skill checklist; no edits.",
+      "files": [],
+      "assertions": [
+        "Recognises the file is a subagent, not a skill",
+        "Points to agent-creator",
+        "Does not issue a skill verdict",
+        "Real agent file unchanged"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "enhance-flawed-skill",
+      "prompt": "improve the skill at SKILL_DIR. Confirmed intent: draft a pull request title and description from the current branch's diff against its base. Triggers when I ask for a PR description or PR title. Not for commit messages or code review. Output: a title under 72 characters and a body of at most five bullets, in chat. I approve applying every fix you propose that keeps to that intent \u2014 no need to ask. Show me what changed and re-check it afterwards.",
+      "expected_output": "Snapshot of original taken; fixes applied; diff shown; second audit round run; ends APPROVED or states remaining FAILs; behaviour still PR description only.",
+      "files": [
+        "fixtures/pr-notes"
+      ],
+      "assertions": [
+        "Snapshot of original kept",
+        "Diff or before/after shown",
+        "Re-check after edits (second round)",
+        "Template reference resolved (file created or reference removed)",
+        "Description excludes commit messages",
+        "Description no longer says 'any git writing task'",
+        "Unused old_helper.py removed or justified"
+      ]
+    }
+  ]
+}
