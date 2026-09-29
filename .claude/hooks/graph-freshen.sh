@@ -11,7 +11,7 @@ prompt=$(python3 -c 'import json,sys
 try: print(json.load(sys.stdin).get("prompt",""))
 except Exception: pass' 2>/dev/null)
 
-grep -qiE '\b(implement|investigat|debug|diagnos|fix|bug|trace|refactor|where (is|does)|how does|affect|impact|review|analy[sz]|ticket|subc-[0-9]+|fkc-[0-9]+)|/(implement-ticket|implement-review|create-ticket)' <<<"$prompt" || exit 0
+grep -qiE '\b(implement|investigat|debug|diagnos|fix|bug|trace|refactor|where (is|does)|how does|affect|impact|review|analy[sz]|ticket|raise (this|it|a|an)|write (this|it) up|log (this|it|a|an)|story|requirement|subc-[0-9]+|fkc-[0-9]+)|/(implement-ticket|implement-review|create-ticket)' <<<"$prompt" || exit 0
 
 stale=$("$HOOKS/graph.sh" status 2>/dev/null | grep -E '  (stale|missing) ' | sed -E 's/^- +//; s/ +/ /g' | cut -d' ' -f1-3)
 if [ -n "$stale" ]; then
