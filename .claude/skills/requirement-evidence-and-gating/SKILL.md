@@ -1,16 +1,13 @@
 ---
 name: requirement-evidence-and-gating
-description: Classify every claim behind a requirement as EXPLICIT (the requester said it), VISUAL (readable in a supplied image), CODEBASE (confirmed in code) or INFERENCE (assumed), account for every part of the request so nothing is silently dropped, and block the deliverable while a material ambiguity is still unresolved. Use whenever raw stakeholder input — PO notes, chat messages, bug reports, feature requests — is being turned into a ticket, spec, user story, plan or any written deliverable where an invented or missed requirement causes real rework. Trigger even when the calling task never says "evidence": any "turn this messy input into a formal document" job needs it. Owns evidence tagging, coverage and the ambiguity gate; does not read images itself and does not own any document's template.
+description: Tag every claim behind a requirement as EXPLICIT, VISUAL, CODEBASE or INFERENCE, account for every part of the request so nothing is dropped, and block the deliverable while a material ambiguity is open. Use whenever PO notes, chat, bug reports or feature requests become a ticket, spec, story or plan — even when nobody says "evidence". Owns tagging, coverage and the gate.
 ---
 
 # Requirement evidence & gating
 
-A written deliverable is only as good as what it can prove. This skill is the shared
-discipline for telling apart what was actually **said** from what was merely **assumed**,
-for proving that nothing in the request was **left out**, and for refusing to ship while a
-material assumption is still hiding inside the document.
-
-Two failure modes, equally expensive, and this skill exists to catch both:
+Tell what was **said** from what was **assumed**, prove nothing was **left out**, and
+refuse to ship while a material assumption hides in the document. Two failure modes, both
+expensive:
 
 - **Invented** — the document states something nobody asked for. Caught by §1–§2.
 - **Missed** — the requester said or showed something and the document quietly lost it.
@@ -24,7 +21,7 @@ from it.
 
 | # | Claim, in the source's own words | Tag | Disposition | Lands in |
 |---|---|---|---|---|
-| 1 | "export all the employee info to Excel" | `EXPLICIT` | `USED` | Requested behaviour |
+| 1 | "export all the employee info to Excel" | `EXPLICIT` | `USED` | Acceptance criteria |
 | 2 | Active filter applied in screenshot 1 | `VISUAL` | `QUESTION` | — (asked, round 1) |
 | 3 | Export button already exists on Suppliers | `CODEBASE` | `IMMATERIAL` | — (logged, dropped) |
 
@@ -54,10 +51,8 @@ functionality to fill a gap. A guess dressed as a fact is worse than a blank.
 Before refining anything, keep the requester's original wording — the message, the quoted
 chat, the bug report — unedited, in the ledger's source column or beside it. Refinement is
 lossy by design; the verbatim text is what §4 checks the draft against, and what settles a
-later "that is not what I asked for".
-
-Where the calling skill keeps a record of the work (a sidecar, a ticket comment, a plan
-file), the verbatim request belongs there too.
+later "that is not what I asked for". Where the caller keeps a work record, the verbatim
+request goes there too.
 
 ## 3. Every part of the request gets a disposition
 
@@ -67,7 +62,7 @@ Sources to split, all of them:
 
 - the request text, including asides, parentheses, "also" clauses and anything after
   "oh and";
-- every readable element the screenshot skill reported (§ that skill's inventory);
+- every readable element the screenshot skill reported (its §3 inventory);
 - quoted messages, forwarded complaints, and the example the requester gave;
 - explicit non-asks ("not the mobile app", "don't touch the invoices") — these are rows
   too;
@@ -133,7 +128,9 @@ down as an open item and handed downstream as someone else's problem.
 Before the deliverable is written, every `QUESTION` row needs a requester answer.
 
 - Ask with your available question tool (`AskUserQuestion` where present), **batched — at
-  most four per round**.
+  most four per round**. No question tool (a subagent) → return the numbered questions,
+  with their options, to your caller and wait to be resumed with the answers. That is a
+  round asked, not a round unanswered.
 - Each question carries **concrete options drawn from what the evidence actually
   supports**, never invented options, and says in one clause why the answer changes what
   gets built.
@@ -168,18 +165,26 @@ with no invitation to revisit it later, and do not raise it as a question.
 `UNKNOWN — REQUIRES VERIFICATION` is legitimate for exactly one thing: a **system fact you
 genuinely could not verify** — whether a feature exists in a given environment, how code
 reaches a particular stage, what a third party returns. That is an investigation limit, and
-it belongs in the deliverable stated as such, with what you tried.
+it is stated in the deliverable as such, with what you tried and why it does not block
+the build. Where it goes is the calling skill's template — in a ticket, a line under
+`Decisions already made`: "**X:** unknown — <what was tried>; <why it does not block>".
+It adds no section.
 
 A requirement gap is never this. It is always a question for the requester.
 
 ## 9. If the gate fails, report — do not produce
 
-When three rounds pass without resolution, or the requester will not decide, stop and
-report in this shape (swap `<deliverable>` for whatever the calling skill produces —
-ticket, spec, story, plan):
+This section owns the `BLOCKED` outcome for every calling skill. When three rounds pass
+without resolution, or the requester will not decide:
+
+- **Create nothing.** No draft, no partial document, no issue with the questions inside it,
+  nothing "to track the discussion". A half-resolved document looks finished, which makes
+  it more dangerous than none.
+- **Report in this shape**, with `<deliverable>` swapped for the caller's (ticket, spec,
+  story, plan):
 
 ```
-<Deliverable> not created — requirement not sufficiently defined.
+No <deliverable> raised — requirement not sufficiently defined.
 
 Open questions:
 - <question>  (why it changes what gets built)
@@ -187,13 +192,11 @@ Open questions:
 Already established:
 - <what the investigation did settle>
 
-Answer these and the <deliverable> can be written.
+Answer these and the <deliverable> can be raised.
 ```
 
-Nothing partial gets saved, created or sent. A half-resolved document is more dangerous
-than none, because it looks finished. Reporting open questions is a **successful
-outcome** — do not apologise for it, and do not offer to produce the deliverable anyway
-with the gaps noted.
+- **It is a successful outcome.** Do not apologise for it, and do not offer to produce the
+  deliverable anyway with the gaps noted.
 
 ## 10. What the calling skill gets back
 
@@ -203,20 +206,16 @@ Hand back exactly this, so the caller can write without re-deriving anything:
 - the `USED` rows grouped by the section they land in;
 - the `SCOPE-OUT` lines, ready to paste into the out-of-scope statement;
 - any `UNVERIFIABLE` row with what was tried;
-- gate verdict: `PASSED` (nothing blocking) or `BLOCKED` with the §9 report.
-
-`BLOCKED` means the caller writes nothing. That decision is this skill's, not the
-caller's.
+- gate verdict: `PASSED` (nothing blocking) or `BLOCKED` with the §9 report. The verdict
+  is this skill's, not the caller's.
 
 ## 11. Boundaries — what this skill does not own
 
-- **Reading images.** Page, tabs, labels, columns, states, annotations, before/after
-  pairs, unreadable crops, and whether several images are one requirement — all owned by
-  the `screenshot-requirement-analysis` skill. This skill consumes the rows it produces
-  and tags them `VISUAL`. Do not re-derive image content here.
-- **The deliverable's shape.** Templates, section wording, house style, where it is saved
-  or created, and any tool-specific field values belong to the calling skill (for example
-  `ticket-writing`, which owns the Jira ticket template and its fields).
-- **Investigating the codebase.** This skill says a `CODEBASE` claim must be confirmed at
-  the affected environment; how to confirm it is the calling skill's or the repo's job.
-- **Writing prose.** Language, tone and British English are the calling skill's.
+- **Reading images** — `screenshot-requirement-analysis`. This skill tags its rows `VISUAL`
+  and does not re-derive image content.
+- **The deliverable's shape** — templates, sections, where it is created, tool field values
+  belong to the calling skill (e.g. `ticket-writing`).
+- **Investigating the code** — a `CODEBASE` claim must be confirmed at the affected
+  environment; how is the caller's job.
+- **Writing prose** — wording is `business-requirement-writing-style`'s; spelling and tone
+  are `plain-uk-english`'s.

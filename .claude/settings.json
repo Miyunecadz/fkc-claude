@@ -12,7 +12,7 @@
         ]
       },
       {
-        "matcher": "mcp__bitbucket__bb_post|mcp__bitbucket__bb_put",
+        "matcher": "mcp__bitbucket__bb_post|mcp__bitbucket__bb_put|mcp__bitbucket__bb_patch",
         "hooks": [
           {
             "type": "command",
@@ -53,6 +53,11 @@
             "type": "command",
             "timeout": 5,
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/plain-uk-english.sh\""
+          },
+          {
+            "type": "command",
+            "timeout": 5,
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/graph-freshen.sh\""
           }
         ]
       }
@@ -81,6 +86,12 @@
       "Read(./**/.env.development)",
       "Read(./.env.production)",
       "Read(./**/.env.production)",
+      "Read(./.env.staging)",
+      "Read(./**/.env.staging)",
+      "Read(./.env.test)",
+      "Read(./**/.env.test)",
+      "Read(./.envrc)",
+      "Read(./**/.envrc)",
       "Read(./**/*.pem)",
       "Read(./**/*.key)",
       "Read(./**/*.p12)",
@@ -101,7 +112,9 @@
       "Read(./credentials.json)"
     ],
     "ask": [
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(git -C * push)",
+      "Bash(git -C * push *)"
     ]
   },
   "attribution": {

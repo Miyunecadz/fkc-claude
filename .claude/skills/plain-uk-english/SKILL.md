@@ -1,6 +1,6 @@
 ---
 name: plain-uk-english
-description: Write every word that reaches a human in British English and plain, short sentences — answers in chat, Jira tickets, PR titles and descriptions, commit messages, code comments, docs and reports. Use whenever text is written for a person to read, and especially when the draft is long, formal or full of jargon. Owns spelling, sentence length, word choice and answer shape; does not own any document's template, evidence rules or gates.
+description: Write every word a human reads in British English and plain, short sentences — chat answers, Jira tickets, PR titles and descriptions, commit messages, code comments, docs and reports. Use whenever text is written for a person, especially a long, formal or jargon-heavy draft. Owns spelling, sentence length, word choice and answer shape.
 ---
 
 # Plain UK English
@@ -94,7 +94,7 @@ ending in yes.
 | Jira tickets, acceptance criteria | Yes — with `business-requirement-writing-style` for structure |
 | PR title and description | Yes — with `pull-request` |
 | Commit messages | Yes — one line, see the repo rule |
-| Docs, reports, `docs/**` | Yes |
+| Docs, reports, `*.md` prose | Yes |
 | Code comments | Yes |
 | Code identifiers, API fields, DB columns | **No** — never rewrite a symbol |
 | Quoted error text, logs, third-party UI labels | **No** — quote verbatim |

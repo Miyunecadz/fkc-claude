@@ -1,127 +1,143 @@
 # Jira mechanics — the project server only
 
-Everything here uses the `jira` MCP server declared in this workspace's `.mcp.json`, whose
-tools are named `mcp__jira__*`. No other Jira surface is permitted (SKILL.md §1).
+This file owns the call order, the JQL, how text survives the trip into Jira, and the
+create, attach and update mechanics. Every call uses the `jira` MCP server
+(`mcp__jira__*`) and nothing else (SKILL.md §1).
 
 ## 1. Resolve the target project — from config, not memory
 
-1. Read `.mcp.json` at the workspace root and take the value after
-   `--jira-projects-filter`. Today that is `FKC`; treat the file as the source of truth,
-   because it can change without this skill changing.
-2. Confirm it exists and you can see it:
+1. Read `.mcp.json` at the workspace root and take the value after `--jira-projects-filter`
+   (today `FKC`). The file is the source of truth; it can change without this skill.
+2. Confirm it resolves: `mcp__jira__jira_search_projects { query: "<key>" }`, or
+   `mcp__jira__jira_get_all_projects` when that returns nothing useful.
+3. Several comma-separated keys → ask the requester which one, offering the keys.
+4. Empty or missing filter → the server is not project-scoped. Ask for the key; never
+   default to the first project that appears.
 
-   ```
-   mcp__jira__jira_search_projects  { query: "<key>" }
-   ```
+`project_key` must match `^[A-Z][A-Z0-9_]+$`.
 
-   or `mcp__jira__jira_get_all_projects` when the search returns nothing useful.
-3. Comma-separated filter with several keys → ask the requester which one with
-   `AskUserQuestion`, offering the keys as options.
-4. Empty or missing filter → the server is not project-scoped. Ask for the key rather
-   than defaulting to whatever project appears first.
-
-`project_key` must match `^[A-Z][A-Z0-9_]+$`. Never pass a project the requester did not
-name or the filter did not resolve.
-
-## 2. Read the project before writing to it
-
-Two searches, both cheap, both required (SKILL.md §2):
+## 2. Duplicate search
 
 ```
-# duplicate check — the outcome, in the requester's own nouns
 mcp__jira__jira_search { jql: "project = <KEY> AND statusCategory != Done AND text ~ \"<key phrase>\" ORDER BY updated DESC", limit: 20 }
-
-# house style — what recent issues in this project actually look like
-mcp__jira__jira_search { jql: "project = <KEY> ORDER BY created DESC", limit: 10, fields: "summary,issuetype,labels,priority,status" }
 ```
 
-From the second, take the summary shape, the issue types in real use, and the labels that
-already exist. Match them. Do not invent a new convention for one ticket, and do not treat
-a label you saw once as required.
+- Two or three phrasings (`TRIAGE.md` §1). Add a `statusCategory = Done` sweep when the
+  request sounds like a regression.
+- Escape double quotes inside `jql`. If `text ~` errors, use `summary ~ "<phrase>"`.
+- Summary shape: when the results show a clear, repeated summary convention, match it.
+  Otherwise follow SKILL.md §7. Never copy a convention, or a label, from one sample.
+  There is no separate house-style search.
 
-Escape double quotes inside `jql`. If a `text ~` search errors on this instance, fall back
-to `summary ~ "<phrase>"`.
+## 3. Writing text that survives Jira
 
-## 2a. This project, as verified on 2026-09-10
+`FKC` is on Jira Cloud. The server turns the Markdown `description` into Jira's own
+document format (ADF). Checked against the server's converter:
 
-A snapshot to save you a wrong guess — **still discover at runtime**, because a
-team-managed project changes without notice:
+| You write | Jira shows |
+|---|---|
+| `##` headings, `**bold**`, numbered and bullet lists, tables, inline code | the same, intact |
+| `[text](https://…)` | a link |
+| a bare `FKC-21` | a link to FKC-21 on this site — fine for this project's keys |
+| a list made **only** of `- [ ]` / `- [x]` lines | real Jira checkboxes, `[x]` ticked — as in `Affected System(s)` |
+| a `- [ ]` line inside an ordinary bullet list | plain text starting `[ ]` — keep checkbox lists separate |
+| `[ ]` inside a sentence (`MERGED TO STAGE: [ ]`) | literal text — expected, leave it |
+| HTML, `<!-- comments -->` | stripped or mangled — never use |
 
-- `FKC` → **fk-connect**, Jira **Cloud**, `software`, **team-managed** (next-gen),
-  instance `zero-hero-tech.atlassian.net`.
-- Issue types: `Story`, `Bug`, `Task`, `Module`, `Subtask`. `Module` is this project's
-  epic-level container — link to one with `{"parent": "FKC-<n>"}`, not `epicKey`, and only
-  when the requester named the module.
-- No required custom field beyond `project`, `summary`, `issuetype` and `reporter`
-  (`reporter` is set from the server's own credentials). `priority`, `labels`, `parent`,
-  `duedate`, `assignee` all exist and are optional.
-- The backlog is nearly empty, so **there is no house style to copy yet.** With fewer than
-  a handful of real issues, follow SKILL.md §8 and `TEMPLATE.md` and do not generalise a
-  convention — or a label — from one sample ticket.
+- **Keys from another Jira site get an explicit link.** A bare `SUBC-18` in an FKC issue
+  links to this site, where it does not exist. Write
+  `[SUBC-18](https://247crm.atlassian.net/browse/SUBC-18)`, in headings too.
+- **Comments are not descriptions.** Bracket and `#` damage seen in comments came from the
+  comment path; this skill does not comment.
+- The read-back (§4) shows the stored text converted back to Markdown. Judge it by content
+  — sections present, lines intact — not by exact characters.
+
+## 4. Discover the fields, then create — one call
+
+Project facts — still check at runtime:
+
+- `FKC` is a team-managed Jira Cloud project. `Module` is its epic-level container: link
+  with `{"parent": "FKC-<n>"}`, not `epicKey`, and only when the requester named the module.
 - `jira_search` and `jira_get_issue` return `browse_url` per issue. That is the link to
-  report (SKILL.md §11); never build one by hand.
-
-## 3. Discover the fields for the type you are about to create
+  report; never build one by hand.
 
 ```
 mcp__jira__jira_get_project_issue_types { project_key: "<KEY>" }
-mcp__jira__jira_get_create_fields       { project_key: "<KEY>", issue_type_id: "<id from above>" }
+mcp__jira__jira_get_create_fields       { project_key: "<KEY>", issue_type_id: "<id>" }
 mcp__jira__jira_get_field_options       { ... }   # only when a field needs its allowed values
 ```
 
-- Pick the type from what the project actually offers. `Bug` when today's behaviour is
-  wrong or broken; the project's story/task type when it is new or changed behaviour;
-  never `Epic` unless the requester asked for an epic.
-- A **required** field you cannot fill from `EXPLICIT`/`VISUAL`/`CODEBASE` evidence is a
-  gate-§6 question for the requester, not a guess and not a placeholder.
-- An **optional** field the requester said nothing about stays unset.
-
-## 4. Create — one call
+- **Type** from what the project offers: `Bug` when today's behaviour is wrong; the
+  story/task type for new or changed behaviour; never an epic unless asked.
+- **Every value is discovered, never invented.** A label, component, version, parent or
+  priority the project does not have is not set.
+- **Only what the requester gave.** No assignee, sprint, parent, label or priority unless
+  they said so. Priority only from a severity the PO stated, only if `priority` is in the
+  create-fields, only with a name from its options.
+- A **required** field you cannot fill from evidence is a question for the requester, not
+  a guess. An **optional** field nobody mentioned stays unset.
+- **One issue per request.** No split, no sub-tasks, unless the requester asked.
 
 ```
 mcp__jira__jira_create_issue {
   project_key: "<KEY>",
-  summary:     "<one line, SKILL.md §8>",
+  summary:     "<one line, 255 characters at most, SKILL.md §7>",
   issue_type:  "<discovered type name>",
-  description: "<TEMPLATE.md, filled, Markdown>",
+  description: "<TEMPLATE.md, filled, Markdown per §3>",
+  components:  "<comma-separated names — only when the requester named them and they exist>",
   additional_fields: "<JSON string — only what the requester gave>"
 }
 ```
 
-- `description` is Markdown and the server converts it. Keep the template's `##` headings
-  and `- [ ]` tick boxes; they survive. Avoid HTML.
-- `additional_fields` is a **JSON string**, not an object. Use it only for values the
-  requester stated: `{"priority": {"name": "High"}}`, `{"labels": ["..."]}`,
-  `{"parent": "<KEY>-123"}` for a parent the requester named.
-- `assignee` stays unset unless the requester named someone. `components` only when they
-  exist in the project and the requester's wording maps to one.
-- Priority is set only from a severity the PO stated, only if the project's create-fields
-  include `priority`, and only using a name from that field's options. The `SEVERITY:`
-  line in the description is the record either way.
+- `additional_fields` is a **JSON string**, not an object: `{"priority": {"name": "High"}}`,
+  `{"labels": ["..."]}`, `{"parent": "FKC-123"}`.
 
-Then read it back:
+Then attach (§5), and read it back once, after both:
 
 ```
-mcp__jira__jira_get_issue { issue_key: "<KEY>-<n>", fields: "summary,issuetype,description,priority,labels,status" }
+mcp__jira__jira_get_issue { issue_key: "<KEY>-<n>", fields: "summary,issuetype,description,priority,labels,status,attachment", comment_limit: 0 }
 ```
 
-Check the description rendered with its sections intact and the fields hold what you sent.
-Report the key and the URL Jira returned — never construct a link from a base URL you
-assumed.
+Check the sections rendered intact, the fields hold what you sent, and every file you
+uploaded appears in `attachment`.
 
-## 5. Failure modes
+## 5. Attach the screenshots
+
+Only for screenshots that arrived as file paths (SKILL.md §4). One call, all files:
+
+```
+mcp__jira__jira_update_issue {
+  issue_key:     "<KEY>-<n>",
+  fields:        "{}",
+  attachments:   "[\"/abs/path/one.png\", \"/abs/path/two.png\"]",
+  return_fields: "attachment"
+}
+```
+
+- **Absolute paths.** The server runs in its own process; a relative path may not resolve.
+  Check each file exists before the call.
+- `fields` is required; `"{}"` changes nothing else. Never send a field here — this call
+  attaches, it does not edit.
+- Result has `attachment_results`. A file that failed is named in the report as one to
+  attach by hand, with the reason. Do not retry more than once.
+- This is the only use of `jira_update_issue` on a new issue. Editing an existing issue's
+  description is `UPDATE.md`.
+
+## 6. Failure modes
 
 | Symptom | Do this |
 |---|---|
-| No `mcp__jira__*` tool at all | Stop. Report that the project Jira MCP server is not connected. No other server, no local file (SKILL.md §1) |
-| Auth / 401 / 403 | Stop and report it. The credentials live in the server's env file — do not read it, do not work around it |
-| Create errored, unclear whether it landed | Search first: `project = <KEY> AND summary ~ "<summary>" ORDER BY created DESC`. Only create again if nothing came back |
-| Field rejected as unknown or value not allowed | Re-read `jira_get_create_fields` / `jira_get_field_options` and drop the field rather than forcing it |
-| Screenshots to attach | Cannot be done here — the server only downloads attachments. Say so in the report and leave it to the requester |
-| Requester asks for a local copy anyway | The Jira issue is the ticket. Offer the key and link, or paste the body in chat — do not write a file |
+| No `mcp__jira__*` tool at all | Stop — SKILL.md §1 |
+| Auth / 401 / 403 | Stop and report it. Credentials live in the server's env file — do not read it or work round it |
+| Create errored, unclear whether it landed | Search first: `project = <KEY> AND summary ~ "<summary>" ORDER BY created DESC`. Create again only if nothing came back |
+| Field rejected, or value not allowed | Re-read `jira_get_create_fields` / `jira_get_field_options` and drop the field rather than force it |
+| Summary rejected as too long | Shorten it — detail belongs in the description |
+| Attachment upload failed | The issue stands. Report the file as one to attach by hand, with the error line |
+| Screenshot with no file (pasted inline) | Cannot be uploaded. Report it as one to attach by hand |
+| Requester asks for a local copy | Offer the key and link, or paste the body in chat — SKILL.md §1 |
 
-## 6. Out of scope for this skill
+## 7. Out of scope
 
-Transitioning, assigning, commenting, estimating, sprint assignment, epic hierarchy
-edits, deleting an issue, and anything in another project. Raising the ticket is where
-this stops.
+Transitioning, assigning, commenting, watchers, issue links, estimating, sprints,
+hierarchy edits, deleting, and any other project. Raising the issue, attaching its
+screenshots, and extending an existing issue (`UPDATE.md`) are where this stops.

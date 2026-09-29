@@ -50,8 +50,12 @@ def problems(text):
 
 
 def run_hook(payload):
+    return run_hook_raw(json.dumps(payload))
+
+
+def run_hook_raw(raw):
     buf = io.StringIO()
-    stdin, sys.stdin = sys.stdin, io.StringIO(json.dumps(payload))
+    stdin, sys.stdin = sys.stdin, io.StringIO(raw)
     try:
         with redirect_stdout(buf):
             pb.hook()
@@ -322,6 +326,33 @@ Unit tests pass.
                             for p in cm.exception.problems), cm.exception.problems)
 
 
+class AuthorOutput(unittest.TestCase):
+    """pr-author writes <repo>.title (one line) and <repo>.txt starting at `Ticket:`."""
+
+    def test_the_body_file_formats(self):
+        body = fmt("Ticket: none\n\nWhat: A change.\n\nWhy: A reason.\n\nCheck:\n- Try it.\n")
+        self.assertEqual(problems(body), [])
+
+    def test_a_title_block_in_the_body_file_is_refused_with_a_hint(self):
+        with self.assertRaises(pb.Invalid) as cm:
+            fmt("title:\nA change\n\nTicket: none\nWhat: A.\nWhy: B.\nCheck:\n1. C.\n")
+        self.assertTrue(any(".title file" in p for p in cm.exception.problems),
+                        cm.exception.problems)
+
+    def test_ticket_given_at_the_gate_replaces_none(self):
+        out = fmt("Ticket: none\nWhat: A.\nWhy: B.\nCheck:\n1. C.\n", ticket=TICKET_URL)
+        self.assertTrue(out.startswith("Ticket: " + TICKET + "\n"))
+        self.assertEqual(problems(out), [])
+
+    def test_title_rules(self):
+        self.assertEqual(pb.validate_title("Refuse holiday requests over the allowance\n"), [])
+        self.assertTrue(pb.validate_title("x" * (pb.MAX_TITLE + 1)))
+        self.assertTrue(pb.validate_title("fix(api): a thing"))
+        self.assertTrue(pb.validate_title("SUBC-3 Rename packages"))
+        self.assertTrue(pb.validate_title("   "))
+        self.assertTrue(pb.validate_title("one\ntwo"))
+
+
 class Rendering(unittest.TestCase):
     """The bug from PR #125: valid-looking plain text renders as one wall of paragraphs."""
 
@@ -405,19 +436,25 @@ class Hook(unittest.TestCase):
     def test_valid_body_is_allowed_silently(self):
         self.assertIsNone(run_hook(self.payload(VALID)))
 
-    def test_attribution_is_stripped_in_flight(self):
-        out = run_hook(self.payload(
-            VALID + "\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"))
-        fixed = out["hookSpecificOutput"]["updatedInput"]["body"]["description"]
-        self.assertEqual(fixed, VALID)
-        self.assertNotIn("permissionDecision", out["hookSpecificOutput"])
+    def denied(self, out):
+        self.assertIsNotNone(out)
+        hso = out["hookSpecificOutput"]
+        self.assertEqual(hso["permissionDecision"], "deny")
+        self.assertNotIn("updatedInput", hso)       # never swaps in a body nobody approved
+        return hso["permissionDecisionReason"]
 
-    def test_headings_are_normalised_in_flight(self):
-        out = run_hook(self.payload("## Ticket\nFKC-279\n\n## What\nA change.\n\n"
-                                    "## Why\nA reason.\n\n## Check\n- Try it.\n"))
-        fixed = out["hookSpecificOutput"]["updatedInput"]["body"]["description"]
-        self.assertEqual(fixed, "Ticket: FKC-279\n\n**What**  \nA change.\n\n"
-                                "**Why**  \nA reason.\n\n**Check**\n\n1. Try it.\n")
+    def test_attribution_is_denied_with_the_diff_not_rewritten(self):
+        reason = self.denied(run_hook(self.payload(
+            VALID + "\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n")))
+        self.assertIn("attribution", reason)
+        self.assertIn("-🤖 Generated with", reason)
+        self.assertIn("Nothing was rewritten", reason)
+
+    def test_headings_are_denied_with_the_diff_not_normalised(self):
+        reason = self.denied(run_hook(self.payload(
+            "## Ticket\nFKC-279\n\n## What\nA change.\n\n## Why\nA reason.\n\n## Check\n- Try it.\n")))
+        self.assertIn("+**What**··", reason)          # the hard break is made visible
+        self.assertIn("-## What", reason)
 
     def test_missing_why_is_denied(self):
         out = run_hook(self.payload("Ticket: FKC-279\n\n**What**  \nA change.\n\n"
@@ -444,6 +481,53 @@ class Hook(unittest.TestCase):
         self.assertIsNone(run_hook(self.payload("hi", path=self.PATH + "/124/approve")))
         self.assertIsNone(run_hook(self.payload("hi", path="/repositories/lisafk/fk-mobile")))
         self.assertIsNone(run_hook({"tool_name": "Bash", "tool_input": {"command": "ls"}}))
+
+    def test_patch_is_covered_like_put(self):
+        reason = self.denied(run_hook(self.payload(
+            "Ticket: FKC-279\n\n**What**  \nA change.\n", path=self.PATH + "/124",
+            tool="mcp__bitbucket__bb_patch")))
+        self.assertIn("missing Why section", reason)
+        self.assertIsNone(run_hook(self.payload(VALID, path=self.PATH + "/124",
+                                                tool="mcp__bitbucket__bb_patch")))
+
+    def test_title_only_update_is_allowed(self):
+        self.assertIsNone(run_hook({"tool_name": "mcp__bitbucket__bb_put",
+                                    "tool_input": {"path": self.PATH + "/124",
+                                                   "body": {"title": "Refuse late holiday requests"}}}))
+
+    def test_bad_title_is_denied(self):
+        long = "A" * (pb.MAX_TITLE + 1)
+        for title in (long, "feat: refuse late requests", "FKC-12 Refuse late requests", "", "a\nb"):
+            reason = self.denied(run_hook(self.payload(VALID, body={"title": title})))
+            self.assertIn("title", reason, title)
+        self.denied(run_hook({"tool_name": "mcp__bitbucket__bb_put",
+                              "tool_input": {"path": self.PATH + "/124", "body": {"title": long}}}))
+
+    def test_path_without_leading_slash_is_covered(self):
+        self.denied(run_hook(self.payload("", path=self.PATH.lstrip("/"))))
+        self.denied(run_hook(self.payload("", path="2.0" + self.PATH)))
+
+    def test_body_sent_as_a_json_string_is_checked(self):
+        p = self.payload(VALID)
+        p["tool_input"]["body"] = json.dumps(p["tool_input"]["body"])
+        self.assertIsNone(run_hook(p))
+        p = self.payload("Ticket: FKC-1\n")
+        p["tool_input"]["body"] = json.dumps(p["tool_input"]["body"])
+        self.assertIn("missing Why section", self.denied(run_hook(p)))
+
+    def test_body_that_is_not_an_object_is_denied(self):
+        for body in ("not json", [1, 2], None):
+            p = {"tool_name": "mcp__bitbucket__bb_post",
+                 "tool_input": {"path": self.PATH, "body": body}}
+            self.denied(run_hook(p))
+
+    def test_unreadable_payload_fails_closed_only_for_pr_writes(self):
+        self.denied(run_hook_raw('["mcp__bitbucket__bb_post", "/pullrequests"]'))
+        self.denied(run_hook_raw('{"tool_name": "mcp__bitbucket__bb_post", '
+                                 '"tool_input": ["/repositories/a/b/pullrequests"]}'))
+        self.denied(run_hook_raw("{not json /pullrequests"))
+        self.assertIsNone(run_hook_raw("[1, 2]"))
+        self.assertIsNone(run_hook_raw("{not json"))
 
     def test_pr_write_without_title_or_description_is_untouched(self):
         self.assertIsNone(run_hook({"tool_name": "mcp__bitbucket__bb_put",

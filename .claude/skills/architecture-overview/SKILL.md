@@ -1,30 +1,35 @@
 ---
 name: architecture-overview
-description: Use when you need the big picture of how the repos connect, or to trace a flow across a repo boundary.
+description: Use when you need the big picture of how the three repos connect, or to trace a flow across a repo boundary (client screen to backend resolver to database).
 stacks: [all]
 ---
 
 # Architecture overview
 
-Get the whole-system map, or follow one flow from repo to repo.
+**Shape:** `fk-admin-panel-fe` (web) and `fk-mobile` (app) are Apollo clients of the
+GraphQL API in `fk-admin-panel-be`. The backend owns the MariaDB database, auth,
+Bull queues and cron.
 
-**Where to look:**
+Repos, branches and cross-repo docs: `docs/repo-map.md`. Surface and permissions:
+`docs/_shared/api-contract.md`.
 
-1. `docs/repo-map.md` — the registry of repos and how they relate.
-2. `docs/_shared/api-contract.md` — the cross-repo spine.
-3. Per-repo structure: **query the map, don't re-read source** — and query it through the
-   resolver, which finds the map that matches the tree you are in and refreshes it first:
+**Within one repo,** query its map rather than re-reading source:
 
-   ```bash
-   .claude/hooks/graph.sh query    <repo-or-worktree-or-file> "<question>"
-   .claude/hooks/graph.sh affected <path> "<symbol>"   # what a change to this reaches
-   .claude/hooks/graph.sh explain  <path> "<symbol>"
-   .claude/hooks/graph.sh status                       # what maps exist, and their freshness
-   ```
+```bash
+.claude/hooks/graph.sh query    <repo-worktree-or-file> "<question>"
+.claude/hooks/graph.sh affected <path> "<symbol>"   # what a change reaches
+.claude/hooks/graph.sh explain  <path> "<symbol>"
+```
 
-   Never pass `--graph` yourself and never read `docs/<repo>/architecture/graph.json`
-   directly: a ticket worktree under `.work/` has its **own** map on its own branch, and the
-   workspace map describes the repo's default branch instead. Re-read source only when the
-   map can't answer, and always to confirm a `path:line` before asserting behaviour.
+Each map describes the branch its checkout is on. A ticket worktree under `.work/`
+has its own. Confirm any `path:line` in source before asserting behaviour.
 
-**The one thing to remember:** cross-repo edges are **runtime** (repos talk over the API), not static imports. Graphify only draws static edges, so it will *not* show the connection between repos. The boundary between repos lives in `docs/_shared/api-contract.md` — that is where cross-repo flows are documented, not in any per-repo graph.
+**Across repos,** the maps cannot help. The link is runtime GraphQL, not static
+imports, so no map has a cross-repo edge. Trace it by hand:
+
+1. Client operation: `gql` constant in `fk-admin-panel-fe/src/graphql/` or `fk-mobile/src/graphql/`.
+2. Schema: `fk-admin-panel-be/src/typedefs/<name>.typedef.js`.
+3. Permission: `fk-admin-panel-be/src/configs/shield.js`.
+4. Resolver: `fk-admin-panel-be/src/resolvers/<name>.resolver.js`, then the SQL or queue it calls.
+
+For changes to that surface, load `graphql-contract`.

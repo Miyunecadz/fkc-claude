@@ -12,17 +12,23 @@
 # ticket-worktree.sh status <KEY> [repo] state of each worktree
 # ticket-worktree.sh list every ticket workspace
 # ticket-worktree.sh clean <KEY> [repo] drop build output, keep the code
-# ticket-worktree.sh remove <KEY> [repo] [--force] tear down
+# ticket-worktree.sh remove <KEY> [repo] [--force] tear down a worktree
+# ticket-worktree.sh release <KEY> <repo> give up an in-place hold
 # ticket-worktree.sh sidecar init <KEY> <summary> write the header, state NEW
+# ticket-worktree.sh sidecar header <KEY> k=v ... set jira/repos/graph/ticket
 # ticket-worktree.sh sidecar append <KEY> <Section> <STATE> body on stdin
 # ticket-worktree.sh sidecar state <KEY> <STATE> [note] state change only
-# ticket-worktree.sh sidecar show <KEY> [--header] read it back
+# ticket-worktree.sh sidecar show <KEY> [--header|--sections|--last [Section...]]
 #
-# The sidecar subcommand exists so the main thread never needs Edit or Write. Appending a
-# stage section used to be a read-modify-write of the whole file emitted as a heredoc —
-# 1-2k output tokens per stage, permanently resident in context. 'sidecar append' takes
-# only the new body, and updates the section, 'state:' and the '## Log' line in one
-# atomic step, which is also the rule the workflow kept breaking by hand.
+# The sidecar subcommand exists so the main thread never needs Edit or Write. 'sidecar
+# append' takes only the new body, and updates the section, 'state:', 'blocked:' and the
+# '## Log' line in one step.
+#
+# BLOCKED is a flag, not a state: 'state <KEY> BLOCKED <note>' and 'append ... BLOCKED'
+# set the 'blocked:' line and leave 'state:' as it was. The next append with a real state
+# clears it.
+#
+# TICKET_WORK_DIR overrides .work/ (tests only).
 #
 # Two modes, chosen per ticket by the workflow (see MODE in the meta file):
 #
@@ -31,25 +37,26 @@
 #             for a cross-repo ticket whose repos are built in parallel.
 #   in-place  (--in-place)         the branch is checked out in the user's own <repo>/ and
 #             .work/<KEY>/ holds only the sidecar, the meta and the logs — no source. One
-#             ticket at a time, and the repo's own labelled graphify map answers queries,
-#             which is the map with community names on it.
+#             ticket at a time per repo; the repo's own map (<repo>/graphify-out/) answers
+#             queries and tracks whatever branch the checkout is on.
 #
 # Nothing downstream should build the tree path itself. Ask for it:
 #   tree=$(.claude/hooks/ticket-worktree.sh tree <KEY> <repo>)
 #
-# Layout (workspace root is NOT a git repo — each repo has its own):
+# Layout (the workspace root is its own git repo and ignores .work/ and the three repos):
 # .work/<KEY>/work.md state sidecar, written by the workflow
 # .work/<KEY>/<repo>/ the worktree (worktree mode only; absent in-place)
-# .work/<KEY>/meta/<repo>.env MODE / BASE_REF / BASE_SHA / BRANCH, recorded at prepare time
+# .work/<KEY>/meta/<repo>.env MODE / BASE_REF / BASE_SHA (full) / BRANCH, at prepare time
+# .work/<KEY>/meta/<repo>.env.released  a released in-place hold (holds nothing)
 # .work/<KEY>/validate/ validator logs (kept out of model context)
 # .work/<KEY>/review/ reviewer reports
 #
-# Exit: 0 ok | 1 usage / refused | 2 git failure
+# Exit: 0 ok | 1 usage / refused | 2 git failure | 5 status could not fetch (offline)
 
 set -uo pipefail
 HOOKS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HOOKS/../.." && pwd)"
-WORK="$ROOT/.work"
+WORK="${TICKET_WORK_DIR:-$ROOT/.work}"
 REPOS="fk-admin-panel-be fk-admin-panel-fe fk-mobile"
 
 die() { echo "$1" >&2; exit "${2:-1}"; }
@@ -58,6 +65,29 @@ valid_repo() { for r in $REPOS; do [ "$r" = "$1" ] && return 0; done; return 1; 
 valid_key() { echo "$1" | grep -qE '^[A-Za-z][A-Za-z0-9]*-[0-9]+$'; }
 
 meta_of() { echo "$WORK/$1/meta/$2.env"; }
+
+# Recorded shas are full length now; older meta files hold 7-char ones. Compare by prefix.
+sha_eq() {
+ local a="$1" b="$2"
+ [ -n "$a" ] && [ -n "$b" ] || return 1
+ case "$a" in "$b"*) return 0 ;; esac
+ case "$b" in "$a"*) return 0 ;; esac
+ return 1
+}
+
+# git status, minus the node_modules and .env* symlinks prepare itself made in a worktree.
+# git does not ignore a symlink with a 'node_modules/' rule, so without this every
+# worktree reads as dirty.
+real_porcelain() {
+ git -C "$1" status --porcelain 2>/dev/null | while IFS= read -r l; do
+  case "$l" in
+   '?? node_modules'|'?? .env'|'?? .env.'*) [ -L "$1/${l#?? }" ] && continue ;;
+  esac
+  printf '%s\n' "$l"
+ done
+}
+
+sidecar_state() { sed -n 's/^state:[[:space:]]*//p' "$WORK/$1/work.md" 2>/dev/null | head -1; }
 
 # ---- where does this ticket's code live? -------------------------------------------
 # One answer, in one place. Everything downstream — status, clean, remove, freshness,
@@ -95,26 +125,31 @@ cmd_tree() {
 }
 
 # In-place claims the user's checkout, so only one ticket may hold a repo that way.
+# Only a live meta/<repo>.env holds it: a *.env.released file never does. A ticket whose
+# PR is open (state PR_OPEN) is finished with the checkout, so it does not hold it either.
 in_place_conflict() { # in_place_conflict <key> <repo> -> prints the other key, if any
  local d k; for d in "$WORK"/*/; do
   [ -d "$d" ] || continue
   k=$(basename "$d"); [ "$k" = "$1" ] && continue
   [ -f "$WORK/$k/meta/$2.env" ] || continue
-  [ "$(mode_of "$k" "$2")" = "in-place" ] && { echo "$k"; return; }
+  [ "$(mode_of "$k" "$2")" = "in-place" ] || continue
+  [ "$(sidecar_state "$k")" = "PR_OPEN" ] && continue
+  echo "$k"; return
  done
 }
 
 # ---- prepare ----------------------------------------------------------------------
 cmd_prepare() {
- local key="" repo="" base="" branch="" in_place=0 pos=0
+ local key="" repo="" base="" branch="" in_place=0 pos=0 mode_flag=0
  for a in "$@"; do
   case "$a" in
-   --in-place) in_place=1 ;;
-   --worktree) in_place=0 ;;
+   --in-place) in_place=1; mode_flag=1 ;;
+   --worktree) in_place=0; mode_flag=1 ;;
    *) pos=$((pos+1))
       case "$pos" in 1) key="$a" ;; 2) repo="$a" ;; 3) base="$a" ;; 4) branch="$a" ;; esac ;;
   esac
  done
+ local asked_mode="$in_place"
  [ -n "$key" ] && [ -n "$repo" ] && [ -n "$base" ] || die "usage: prepare <KEY> <repo> <base-ref> [branch] [--in-place]"
  valid_key "$key" || die "'$key' is not a ticket key (expected e.g. FKC-123)."
  valid_repo "$repo" || die "'$repo' is not a repo in this workspace ($REPOS)."
@@ -125,6 +160,22 @@ cmd_prepare() {
  local existing; existing=$(mode_of "$key" "$repo")
  if [ -n "$existing" ]; then
   case "$existing" in in-place) in_place=1 ;; worktree) in_place=0 ;; esac
+  [ "$mode_flag" = 0 ] || [ "$asked_mode" = "$in_place" ] || echo "WARNING: $repo was prepared as $existing for $key — keeping $existing; the mode flag was ignored."
+ fi
+
+ # A re-run keeps what the meta recorded. Say so when the arguments disagree, rather
+ # than silently ignoring them.
+ local mf; mf=$(meta_of "$key" "$repo")
+ if [ -f "$mf" ]; then
+  local rec_branch rec_base
+  rec_branch=$(sed -n 's/^BRANCH=//p' "$mf"); rec_base=$(sed -n 's/^BASE_REF=//p' "$mf")
+  if [ -n "$branch" ] && [ "$branch" != "$rec_branch" ]; then
+   echo "WARNING: $repo is recorded on branch $rec_branch for $key; '$branch' was ignored. Remove or release it first to change branch."
+  fi
+  if [ "$base" != "$rec_base" ] && [ "origin/$base" != "$rec_base" ]; then
+   echo "WARNING: $repo is recorded with base $rec_base for $key; '$base' was ignored."
+  fi
+  branch="$rec_branch"
  fi
 
  local wt="$WORK/$key/$repo"
@@ -144,7 +195,7 @@ cmd_prepare() {
  else
  die "base ref '$base' does not exist in $repo (tried origin/$base and $base)." 2
  fi
- base_sha=$(git -C "$ROOT/$repo" rev-parse --short "$base_ref")
+ base_sha=$(git -C "$ROOT/$repo" rev-parse "$base_ref")
 
  mkdir -p "$WORK/$key/meta" "$WORK/$key/validate" "$WORK/$key/review"
  local prev_branch=""
@@ -153,7 +204,7 @@ cmd_prepare() {
   # In-place takes over the user's own checkout, so the two ways that can destroy
   # their work are refused outright rather than warned about.
   local other; other=$(in_place_conflict "$key" "$repo")
-  [ -z "$other" ] || die "$repo is already held in-place by $other. Finish or switch that ticket to a worktree first, or prepare this one with a worktree."
+  [ -z "$other" ] || die "$repo is already held in-place by $other (state $(sidecar_state "$other")). Run 'ticket-worktree.sh release $other $repo' once that ticket is done with the checkout, or prepare this one with a worktree."
   prev_branch=$(git -C "$ROOT/$repo" rev-parse --abbrev-ref HEAD 2>/dev/null)
 
   if [ "$(git -C "$ROOT/$repo" rev-parse --abbrev-ref HEAD 2>/dev/null)" = "$branch" ]; then
@@ -233,7 +284,7 @@ META
 mode: $MODE
 path: ${wt#"$ROOT"/}
 branch: $BRANCH
-base: $BASE_REF @ $BASE_SHA
+base: $BASE_REF @ ${BASE_SHA:0:12}
 deps: $linked
 env: $envs file(s)
 OUT
@@ -241,7 +292,7 @@ OUT
   cat <<OUT
 was: $repo was on ${PREV_BRANCH:-?} — restore it with: git -C $repo checkout ${PREV_BRANCH:-<branch>}
 next: edit under $repo/ as usual. The branch is checked out there; .work/$key holds only
-       the sidecar, meta and logs. Graph queries resolve to the repo's own labelled map.
+       the sidecar, meta and logs. Graph queries resolve to $repo/graphify-out/.
 OUT
  else
   echo "next: edit only under ${wt#"$ROOT"/} — never under $repo/"
@@ -249,6 +300,7 @@ OUT
 }
 
 # ---- status -----------------------------------------------------------------------
+STATUS_RC=0
 one_status() {
  local key="$1" repo="$2" wt; wt=$(tree_of "$1" "$2")
  [ -n "$wt" ] && [ -d "$wt" ] || { echo "- $repo: not prepared"; return; }
@@ -262,16 +314,21 @@ one_status() {
   echo " ! nothing here belongs to $key right now; re-run prepare to resume it"
   return
  fi
- git -C "$wt" fetch --prune --quiet origin 2>/dev/null
+ local fetched=1
+ git -C "$wt" fetch --prune --quiet origin >/dev/null 2>&1 || fetched=0
  local head dirty ahead behind moved
  head=$(git -C "$wt" rev-parse --short HEAD 2>/dev/null)
- dirty=$(git -C "$wt" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+ dirty=$(real_porcelain "$wt" | wc -l | tr -d ' ')
  read -r behind ahead <<<"$(git -C "$wt" rev-list --left-right --count "$BASE_REF...HEAD" 2>/dev/null || echo '? ?')"
- moved=$(git -C "$wt" rev-parse --short "$BASE_REF" 2>/dev/null)
- echo "- $repo [$MODE]: $BRANCH @ $head | base $BASE_REF cut@$BASE_SHA now@$moved | +$ahead/-$behind | dirty:$dirty"
- [ "$moved" != "$BASE_SHA" ] && [ "$moved" != "" ] && \
- echo " ! base branch moved since this worktree was cut — rebase or re-check before review"
- [ "$dirty" != "0" ] && echo " ! uncommitted changes in the worktree"
+ moved=$(git -C "$wt" rev-parse "$BASE_REF" 2>/dev/null)
+ echo "- $repo [$MODE]: $BRANCH @ $head | base $BASE_REF cut@${BASE_SHA:0:7} now@${moved:0:7} | +$ahead/-$behind | dirty:$dirty"
+ if [ "$fetched" = 0 ]; then
+  echo " ! UNKNOWN (offline) — fetch failed, so the base tip above is the last one seen, not the remote's"
+  STATUS_RC=5
+ elif [ -n "$moved" ] && ! sha_eq "$moved" "$BASE_SHA"; then
+  echo " ! base branch moved since this branch was cut — see ticket-freshness.sh check"
+ fi
+ [ "$dirty" != "0" ] && echo " ! uncommitted changes in the tree"
 }
 
 cmd_status() {
@@ -282,6 +339,7 @@ cmd_status() {
  if [ -n "${2:-}" ]; then one_status "$key" "$2"; else
  for r in $(repos_in_play "$key"); do one_status "$key" "$r"; done
  fi
+ exit "$STATUS_RC"
 }
 
 # ---- list -------------------------------------------------------------------------
@@ -296,7 +354,7 @@ cmd_list() {
  local repos=""
  for r in $(repos_in_play "$key"); do repos="$repos $r[$(mode_of "$key" "$r")]"; done
  echo "- $key: state=${state:--}, repos:${repos:- none}"
- local blocked; blocked=$(grep '^blocked:' "$d/work.md" 2>/dev/null | sed 's/^blocked:[[:space:]]*//')
+ local blocked; blocked=$(grep -m1 '^blocked:' "$d/work.md" 2>/dev/null | sed 's/^blocked:[[:space:]]*//')
  [ -n "$blocked" ] && [ "$blocked" != "-" ] && echo " BLOCKED: $blocked"
  done
  [ "$n" = "0" ] && echo "No ticket workspaces yet."
@@ -370,9 +428,15 @@ cmd_remove() {
   continue
  fi
  local wt; wt=$(tree_of "$key" "$r"); [ -n "$wt" ] && [ -d "$wt" ] || continue
- local dirty; dirty=$(git -C "$wt" status --porcelain | wc -l | tr -d ' ')
- local unpushed; unpushed=$(git -C "$wt" log --oneline @{upstream}..HEAD 2>/dev/null | wc -l | tr -d ' ')
- [ -z "$unpushed" ] && unpushed=$(git -C "$wt" rev-list --count HEAD ^origin/HEAD 2>/dev/null || echo 0)
+ local dirty; dirty=$(real_porcelain "$wt" | wc -l | tr -d ' ')
+ # With no upstream, '@{u}..HEAD' is an error and would count as 0 unpushed. Ask first;
+ # without one, count the commits no remote branch carries.
+ local unpushed
+ if git -C "$wt" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+  unpushed=$(git -C "$wt" rev-list --count '@{u}..HEAD' 2>/dev/null || echo '?')
+ else
+  unpushed=$(git -C "$wt" rev-list --count HEAD --not --remotes 2>/dev/null || echo '?')
+ fi
  if [ "$force" = "0" ] && { [ "$dirty" != "0" ] || [ "$unpushed" != "0" ]; }; then
  echo "- $r: REFUSED — $dirty uncommitted, $unpushed unpushed commit(s). Push or discard first, or pass --force."
  continue
@@ -384,10 +448,32 @@ cmd_remove() {
  echo "note: .work/$key/work.md, the validate/review logs and the branches are kept — delete them yourself when the ticket is closed."
 }
 
+# ---- release ----------------------------------------------------------------------
+# An in-place ticket holds the user's checkout until something lets go of it. 'release'
+# is that something: the meta is kept as <repo>.env.released (the name people used by
+# hand), so the record survives but no longer holds the repo. The branch is untouched.
+cmd_release() {
+ local key="${1:-}" repo="${2:-}"
+ [ -n "$key" ] && [ -n "$repo" ] || die "usage: release <KEY> <repo>"
+ local mf; mf=$(meta_of "$key" "$repo")
+ [ -f "$mf" ] || die "$repo is not prepared for $key — nothing to release."
+ [ "$(mode_of "$key" "$repo")" = "in-place" ] || die "$repo is a worktree for $key — use 'remove', not 'release'."
+ local PREV_BRANCH="" BRANCH=""
+ # shellcheck disable=SC1090
+ . "$mf"
+ mv "$mf" "$mf.released" || die "could not rename $mf"
+ echo "- $repo: released by $key (meta kept as meta/$repo.env.released; branch $BRANCH kept)"
+ echo "  your checkout is still on $(git -C "$ROOT/$repo" rev-parse --abbrev-ref HEAD 2>/dev/null); to go back: git -C $repo checkout ${PREV_BRANCH:-<your branch>}"
+}
+
 # ---- sidecar ----------------------------------------------------------------------
 # The state file is append-only by construction: no subcommand here can rewrite or
 # delete a section that is already there. A repeated section name gets " (2)", " (3)".
-VALID_STATES="NEW ANALYSED PLANNED APPROVED IMPLEMENTING IMPLEMENTED VERIFIED FAILED_VERIFICATION REVIEWED HANDED_OVER PR_OPEN BLOCKED NOT_NEEDED ALREADY_IMPLEMENTED NOT_APPROVED"
+# Every value reaches awk through ENVIRON, never 'awk -v': -v expands escape sequences, so
+# a body holding a regex such as '\d' or a literal '\n' would be written back corrupted.
+VALID_STATES="NEW ANALYSED PLANNED APPROVED IMPLEMENTING IMPLEMENTED VERIFIED UNVERIFIED FAILED_VERIFICATION REVIEWED REVIEW_FAILED HANDED_OVER PR_OPEN NOT_NEEDED ALREADY_IMPLEMENTED NOT_APPROVED BLOCKED"
+# Implement sections allowed per approved plan: the build and one fix round.
+IMPLEMENT_CAP=2
 
 valid_state() { for v in $VALID_STATES; do [ "$v" = "$1" ] && return 0; done; return 1; }
 sidecar_of() { echo "$WORK/$1/work.md"; }
@@ -399,27 +485,54 @@ sc_require() {
  echo "$f"
 }
 
-# rewrite the single 'state:' header line, in place, leaving everything else untouched
-sc_set_state() {
- local f="$1" st="$2"
- awk -v st="$st" '
- !done && /^state:[[:space:]]/ { sub(/^state:[[:space:]]*.*$/, "state:    " st); done=1 }
+# set one header line ('state', 'blocked', ...) in place; add it if it is missing
+sc_set_header() {
+ local f="$1"
+ SC_K="$2" SC_V="$3" awk '
+ BEGIN { k=ENVIRON["SC_K"]; v=ENVIRON["SC_V"] }
+ !done && index($0, k ":") == 1 { printf "%-9s %s\n", k ":", v; done=1; next }
+ !done && /^$/ { printf "%-9s %s\n", k ":", v; done=1 }
  { print }
+ END { if (!done) printf "%-9s %s\n", k ":", v }
  ' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
 }
+sc_set_state() { sc_set_header "$1" state "$2"; }
 
 # Log lines go *inside* the '## Log' block, newest last — never at EOF, which would
 # interleave them into whatever stage section happens to be last.
 sc_log() {
- local f="$1" line="$2" entry
- entry="$(now_utc)  $line"
+ local f="$1"
  grep -q '^## Log$' "$f" || printf '\n## Log\n' >> "$f"
- awk -v e="$entry" '
+ SC_E="$(now_utc)  $2" awk '
+ BEGIN { e=ENVIRON["SC_E"] }
  /^## Log$/ { print; inlog=1; next }
  inlog && /^## / { print e; print ""; inlog=0; print; next }
  { print }
  END { if (inlog) print e }
  ' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+}
+
+# print the last section called <name> (or "<name> (n)"), heading included
+sc_last_section() {
+ SC_N="$2" awk '
+ BEGIN { n=ENVIRON["SC_N"] }
+ /^## / {
+   h=substr($0, 4); sub(/ — .*$/, "", h); sub(/ \([0-9]+\)$/, "", h)
+   if (h == n) { buf=$0 "\n"; grab=1; next }
+   if (grab) { last=buf; grab=0 }
+ }
+ grab { buf = buf $0 "\n" }
+ END { if (grab) last=buf; printf "%s", last }
+ ' "$1"
+}
+
+# Implement sections since the most recent Approval: that is one plan's rounds.
+sc_implement_rounds() {
+ awk '
+ /^## Approval( \([0-9]+\))? — / { n=0 }
+ /^## Implement( \([0-9]+\))? — / { n++ }
+ END { print n+0 }
+ ' "$1"
 }
 
 cmd_sidecar() {
@@ -436,7 +549,7 @@ cmd_sidecar() {
  cat > "$f" <<SIDECAR
 # Work — $key
 ticket:   $key — ${summary:-<summary>}
-jira:     updated=<ISO> status=<name> fields-sha=<8 hex>
+jira:     updated=<ISO> status=<name>
 state:    NEW
 blocked:  -
 repos:    -
@@ -461,11 +574,7 @@ SIDECAR
  state) die "use 'sidecar state' or 'sidecar append' to change state." ;;
  *) die "unknown header key '$k' (jira|repos|graph|blocked|ticket)." ;;
  esac
- awk -v k="$k" -v v="$v" '
- !done && $0 ~ "^" k ":[[:space:]]" { printf "%-9s %s\n", k ":", v; done=1; next }
- { print }
- END { if (!done) printf "%-9s %s\n", k ":", v }
- ' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+ sc_set_header "$f" "$k" "$v"
  done
  echo "## Sidecar: $key header updated"
  sed -n '1,8p' "$f"
@@ -482,13 +591,22 @@ SIDECAR
  local body; body="$(cat)"
  [ -n "$body" ] || die "refusing to append an empty '$section' section — pipe the body on stdin."
 
+ if [ "$section" = "Implement" ] && [ "$(sc_implement_rounds "$f")" -ge "$IMPLEMENT_CAP" ]; then
+  die "refused: this plan already has $IMPLEMENT_CAP Implement sections (the build and one fix round). Record the standing finding with 'sidecar state $key BLOCKED \"<finding>\"' and hand it to the user; a new round needs a new approved plan."
+ fi
+
+ # A body line that starts '# ' or '## ' would read as a new section to every reader of
+ # this file (--sections, --last, the Log insert). Demote it.
+ body=$(printf '%s\n' "$body" | sed -E 's/^#{1,2} /### /')
+
  # never overwrite: a repeated section becomes "Section (2)"
  local title="$section" n=2
  while grep -qF "## $title — " "$f"; do title="$section ($n)"; n=$((n+1)); done
 
  # '## Log' stays the last section: insert this one above it when it is there.
  if grep -q '^## Log$' "$f"; then
- awk -v t="$title" -v d="$(date -u +%Y-%m-%d)" -v b="$body" '
+ SC_T="$title" SC_D="$(date -u +%Y-%m-%d)" SC_B="$body" awk '
+ BEGIN { t=ENVIRON["SC_T"]; d=ENVIRON["SC_D"]; b=ENVIRON["SC_B"] }
  !done && /^## Log$/ { printf "## %s — %s\n\n%s\n\n", t, d, b; done=1 }
  { print }
  END { if (!done) printf "\n## %s — %s\n\n%s\n", t, d, b }
@@ -496,9 +614,19 @@ SIDECAR
  else
  { printf '\n## %s — %s\n\n' "$title" "$(date -u +%Y-%m-%d)"; printf '%s\n' "$body"; } >> "$f"
  fi
- sc_set_state "$f" "$state"
- sc_log "$f" "$title -> state $state${note:+ — $note}"
- echo "## Sidecar: $key += '## $title' — state now $state"
+ local now_state
+ if [ "$state" = "BLOCKED" ]; then
+  # BLOCKED is a flag: the section is recorded, state: keeps the real stage.
+  sc_set_header "$f" blocked "${note:-see ## $title}"
+  now_state="$(sed -n 's/^state:[[:space:]]*//p' "$f" | head -1) (blocked)"
+  sc_log "$f" "$title -> blocked${note:+ — $note}"
+ else
+  sc_set_state "$f" "$state"
+  sc_set_header "$f" blocked "-"
+  now_state="$state"
+  sc_log "$f" "$title -> state $state${note:+ — $note}"
+ fi
+ echo "## Sidecar: $key += '## $title' — state now $now_state"
  echo "file: .work/$key/work.md ($(wc -l < "$f" | tr -d ' ') lines)"
  ;;
  state)
@@ -507,21 +635,38 @@ SIDECAR
  [ -n "$key" ] && [ -n "$state" ] || die "usage: sidecar state <KEY> <STATE> [note]"
  local f; f="$(sc_require "$key")" || exit 1
  valid_state "$state" || die "'$state' is not a valid state ($VALID_STATES)."
- sc_set_state "$f" "$state"
- [ "$state" = "BLOCKED" ] && [ -n "$note" ] && \
- awk -v v="$note" '!d && /^blocked:[[:space:]]/ { printf "%-9s %s\n", "blocked:", v; d=1; next } { print }' \
- "$f" > "$f.tmp" && mv "$f.tmp" "$f"
- sc_log "$f" "state -> $state${note:+ — $note}"
- echo "## Sidecar: $key state now $state"
+ if [ "$state" = "BLOCKED" ]; then
+  [ -n "$note" ] || die "usage: sidecar state <KEY> BLOCKED \"<what is missing and who can answer it>\""
+  sc_set_header "$f" blocked "$note"
+  sc_log "$f" "blocked — $note"
+  echo "## Sidecar: $key blocked (state stays $(sed -n 's/^state:[[:space:]]*//p' "$f" | head -1))"
+ else
+  sc_set_state "$f" "$state"
+  sc_set_header "$f" blocked "-"
+  sc_log "$f" "state -> $state${note:+ — $note}"
+  echo "## Sidecar: $key state now $state"
+ fi
  ;;
  show)
  local key="${1:-}" what="${2:-}"
- [ -n "$key" ] || die "usage: sidecar show <KEY> [--header|--sections]"
+ [ -n "$key" ] || die "usage: sidecar show <KEY> [--header|--sections|--last [Section...]]"
  local f; f="$(sc_require "$key")" || exit 1
  case "$what" in
  --header) sed -n '1,8p' "$f" ;;
  --sections) grep -n '^## ' "$f" ;;
- *) cat "$f" ;;
+ --last)
+  # header, then the last section of each name asked for (default: Implement, Review)
+  shift 2
+  [ "$#" -gt 0 ] || set -- Implement Review
+  sed -n '1,8p' "$f"
+  local s out
+  for s in "$@"; do
+   out=$(sc_last_section "$f" "$s")
+   if [ -n "$out" ]; then printf '\n%s' "$out"; else printf '\n## %s — none yet\n' "$s"; fi
+  done
+  ;;
+ "") cat "$f" ;;
+ *) die "usage: sidecar show <KEY> [--header|--sections|--last [Section...]]" ;;
  esac
  ;;
  *)
@@ -538,6 +683,7 @@ case "${1:-}" in
  list) shift; cmd_list "$@" ;;
  clean) shift; cmd_clean "$@" ;;
  remove) shift; cmd_remove "$@" ;;
+ release) shift; cmd_release "$@" ;;
  sidecar) shift; cmd_sidecar "$@" ;;
- *) die "usage: ticket-worktree.sh {prepare|tree|status|list|clean|remove|sidecar} ..." ;;
+ *) die "usage: ticket-worktree.sh {prepare|tree|status|list|clean|remove|release|sidecar} ..." ;;
 esac

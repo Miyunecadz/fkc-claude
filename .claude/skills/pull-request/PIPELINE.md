@@ -1,142 +1,142 @@
-# The PR body pipeline — where the tokens stop
+# The PR body pipeline — for changing it, not for running it
+
+Nothing here is needed during `/create-pr`. Read it when you change `pr-body.py`, its tests
+or the posted shape.
 
 ```
 /create-pr
-   │  ticket + implementation context (pr-preflight.sh, Jira, the sidecar)
+   │  preflight, Jira, the sidecar
    ▼
-pr-author agent ──────────► the semantic block: Ticket / What / Why / Check
-   │                        (Claude's only job — written once, never reformatted)
+pr-author ────────────────► <repo>.title (one line) + <repo>.txt (Ticket / What / Why / Check)
+   │                        the only LLM step — written once
    ▼
-pr-body.py format ────────► the exact body: sections ordered, spacing normalised,
-   │                        checks renumbered, banned sections dropped,
-   │                        attribution stripped
+pr-body.py format / title ► the exact body and a checked title, shown at the gate
    ▼
-pr-body.py hook (PreToolUse on bb_post / bb_put)
-   │                        re-checks the body actually being sent; normalises it
-   │                        again if it drifted; denies the call if it cannot be
+pr-body.py hook (PreToolUse on bb_post / bb_put / bb_patch)
+   │                        re-checks title and body; allows, or denies with the diff.
+   │                        It never rewrites: what the user approved is what is sent
    ▼
-Bitbucket ────────────────► PR created / updated
+Bitbucket
 ```
 
-No LLM runs after the semantic block. Formatting and validation are pure Python and cost
-nothing.
+The shape of a PR body has one right answer and no judgement in it, so it lives in code
+that is testable, instant and identical every run. An LLM asked to "reformat to the house
+style" is a fresh sample each time: it costs a round trip, can drop a step, soften a
+sentence or keep the footer. Judgement — what changed, why, how to check — stays with the
+agent and is written once.
 
-## The components
+## Components
 
 | Component | Path | Job |
 |---|---|---|
-| Content contract | `.claude/skills/pull-request/DESCRIPTION.md` | What Claude writes, and the shape that gets posted |
-| Drafting agent | `.claude/agents/pr-author.md` | Reads one repo's diff, returns the semantic block. The diff never enters the main thread |
-| Formatter + validator + hook | `.claude/hooks/pr-body.py` | `format`, `check`, `hook` — one file, one grammar, no duplication |
-| Tests | `.claude/hooks/tests/test_pr_body.py` | 40 cases, standard library only |
-| Orchestration | `.claude/commands/create-pr.md`, `pull-request/SKILL.md` | When it runs, and the approval gate |
-
-## Using it
+| Content rules | `.claude/skills/pull-request/DESCRIPTION.md` | What `pr-author` writes, and every enforced limit |
+| Drafting agent | `.claude/agents/pr-author.md` | Reads one repo's diff, writes the two files |
+| Formatter, validator, hook | `.claude/hooks/pr-body.py` | `format`, `check`, `title`, `hook` — one grammar |
+| Tests | `.claude/hooks/tests/test_pr_body.py` | 72 cases, standard library only |
+| Orchestration | `.claude/commands/create-pr.md`, `pull-request/SKILL.md` | When it runs, and the gate |
 
 ```bash
-.claude/hooks/pr-body.py format -f draft.txt          # semantic block -> body (stdout)
-.claude/hooks/pr-body.py format < draft.txt > body.md
-.claude/hooks/pr-body.py check  -f body.md            # validate a finished body
-.claude/hooks/pr-body.py format -b https://zero-hero-tech.atlassian.net -f draft.txt
+.claude/hooks/pr-body.py format -f draft.txt [-t <card url>] [-b <jira base>]
+.claude/hooks/pr-body.py check  -f body.md
+.claude/hooks/pr-body.py title  -f repo.title
+python3 .claude/hooks/tests/test_pr_body.py
 ```
 
-`-b/--ticket-base` expands a bare `FKC-279` into a browse URL. Without it a bare key is
-posted as a key — the formatter never invents a link.
+`-t` replaces the Ticket value (a card URL the user gave at the gate). `-b` turns a bare key
+into a Jira browse URL; `/create-pr` does not use it, because the ticket line is the Trello
+card. Exit codes: `0` fine · `1` not valid (report on stderr, nothing on stdout) · `2` bad
+usage. Warnings go to stderr and do not fail the run.
 
-Exit codes: `0` fine · `1` the body is not valid (report on stderr, nothing printed to
-stdout) · `2` bad usage. Warnings (`note: 137 words (budget 120)`) go to stderr and do not
-fail the run.
+## The rendered contract
 
-## What the formatter does, exactly
+The semantic block in `DESCRIPTION.md` comes out as exactly this (`··` is two real spaces):
+
+```markdown
+Ticket: [https://trello.com/c/bZZ0akWV/279](https://trello.com/c/bZZ0akWV/279){: data-inline-card='' }
+
+**What**··
+The purchase order and plant order number series are only given to, and only accepted from, users whose role holds the new No. Series view or edit permission.
+
+**Why**··
+Anyone signed in who could reach the Configuration area could rename every future order.
+
+**Check**
+
+1. With a role holding neither permission, the Configuration number series show no values and a save is refused.
+2. Grant No. Series — view: values show, saving is still refused.
+3. Grant No. Series — edit: values show and a change saves.
+4. Create a purchase order — its name and prefix are unchanged.
+
+**Screenshot**
+
+![](https://bitbucket.org/repo/bxjg5L4/images/2340471243-image.png){: data-layout='center' }
+```
+
+Bitbucket renders the description as Markdown, and every detail is load-bearing:
+
+| Detail | Without it, Bitbucket renders |
+|---|---|
+| `**What**` bold | a plain word that reads as part of the sentence |
+| two trailing spaces after `**What**` / `**Why**` | label and text welded into one paragraph |
+| blank line between `**Check**` and `1.` | the whole list swallowed into one line |
+| no hard break after `**Check**` | the list pulled back into the label's paragraph |
+| `{: data-inline-card='' }` on the ticket link | a plain blue URL instead of the Trello smart card |
+
+PR #125 shipped the plain version and rendered as a wall of prose.
+`Formatter.test_reproduces_the_hand_fixed_pr_125_body` pins the shape against the body a
+human repaired in the Bitbucket editor; `Rendering` pins each detail.
+
+## What the formatter does
 
 1. Strips attribution — `Generated with/by Claude Code`, `🤖`, `Co-Authored-By: Claude`,
-   `Claude-Session:`, a bare `claude.ai`/`claude.com` URL, and a trailing `---` left behind.
-2. Parses the four labels in any order, from `## What`, `**What**`, `What:`, `What —` or a
-   bare `What` line. Aliases: `Jira`/`Issue` → Ticket; `Checks`/`Verification`/`Verify` →
-   Check.
-3. Drops the banned boilerplate sections **with their content**, printing
-   `dropped section: <name>` per drop. Rejects any *other* unrecognised heading rather than
-   guessing — it may hold meaning.
-4. Rewraps each section to one line per paragraph, trims trailing whitespace, collapses
-   blank runs. **Wording is never altered** — no truncation, no rewriting, no summarising.
-5. Turns bullets, bare lines or any numbering into `1.` `2.` `3.` from 1.
-6. Wraps a ticket URL as `[<url>](<url>){: data-inline-card='' }` — Bitbucket's smart-card
-   syntax. A bare key (`FKC-281`) or `none` is left alone; `--ticket-base` turns a key into
-   a URL first.
-7. Emits the rendered Markdown — `Ticket:`, `**What**` + hard break, `**Why**` + hard
-   break, `**Check**` + blank line + the list — in that order, and validates its own
-   output before returning it.
-
-Why bold labels and trailing spaces rather than the plainer text they replace: Bitbucket
-renders the description as Markdown. `What` on its own line with the text below it is one
-paragraph, and a numbered list that is not preceded by a blank line is absorbed into the
-paragraph above. PR #125 shipped exactly that and rendered as a wall of prose. The two
-trailing spaces are a hard break, and the blank line before `1.` is what makes a real
-list; both are load-bearing, and `Rendering` in the test file pins them.
-`Formatter.test_reproduces_the_hand_fixed_pr_125_body` pins the whole shape against the
-body a human repaired by hand in the Bitbucket editor — that body is the specification.
+   `Claude-Session:`, a bare `claude.ai`/`claude.com` URL, and a trailing `---`.
+2. Parses the labels in any order, from `## What`, `**What**`, `What:`, `What —` or a bare
+   `What` line. Aliases: `Jira`/`Issue` → Ticket; `Checks`/`Verification`/`Verify` → Check.
+   Text above the Ticket line is refused, with a hint when it is a `title:` block.
+3. Drops banned sections with their content (the list is `BANNED_NAMES`; `DESCRIPTION.md`
+   repeats it), printing `dropped section: <name>`. Refuses any other unknown heading.
+4. Rewraps each section to one line per paragraph. **Wording is never altered.**
+5. Turns bullets, bare lines or any numbering into `1.` `2.` `3.`.
+6. Wraps a ticket URL as a smart card. A bare key or `none` is left alone.
+7. Renders the contract above and validates its own output.
 
 ## What the validator refuses
 
-Empty body · a missing or empty Ticket, What, Why or Check · a Check with no numbered
-steps, steps that are not all numbered, or numbering that is not 1..n · sections out of
-order · a duplicated section · a banned or unknown heading · any Claude Code attribution ·
-more than 12 check steps · more than 250 words · **anything that is not byte-identical to
-what the formatter renders** — the validator's last act is to re-render the body and
-compare, so a lost hard break or a missing blank line fails like any other defect.
-
-Failure output is the same everywhere:
-
-```
-PR validation failed.
-
-Missing or invalid:
-- missing Why section
-
-The PR was not created.
-```
+Empty body · a missing or empty Ticket, What, Why or Check · Check steps not numbered 1..n ·
+sections out of order or duplicated · a banned or unknown heading · attribution · more than
+12 steps · more than 250 words · more than 6 images, or one not on bitbucket.org · anything
+not byte-identical to what the formatter renders.
 
 ## The hook
 
-Registered in `.claude/settings.json` as `PreToolUse` on
-`mcp__bitbucket__bb_post|mcp__bitbucket__bb_put`. It only acts on paths matching
-`/repositories/<ws>/<repo>/pullrequests[/<id>]` that carry a `title` or `description` —
-comments, approvals, merges and every other Bitbucket call pass through untouched.
+Registered in `.claude/settings.json` as `PreToolUse` on the Bitbucket write tools. It acts
+on `repositories/<ws>/<repo>/pullrequests[/<id>]`, with or without a leading `/` or `2.0/`.
+Comments, approvals, merges and other paths pass untouched.
 
-- Body already valid → silent allow.
-- Body fixable (attribution, headings, numbering) → `updatedInput` with the cleaned
-  description, plus a system message saying what changed. **No Claude turn is spent.**
-- Body missing meaning (no Why, empty What, unknown section) → `deny` with the report. The
-  PR is not created, and semantic content is never invented to make it pass.
+- **Create** (`bb_post` to `pullrequests`): title and description are both required.
+- **Update** (`bb_put` / `bb_patch` to `pullrequests/<id>`): checks only the fields sent.
+  A title-only update is allowed when the title passes; a call with neither passes through.
+- A body sent as a JSON string is parsed first; one that is not an object is denied.
+- Any body that is not the formatter's output is **denied with a unified diff** (trailing
+  spaces shown as `·`). Nothing is rewritten in flight, because the user approved exact
+  text at the gate.
+- A payload the hook cannot read is denied when it mentions `pullrequests`, and allowed
+  otherwise. It never fails open on a PR write.
 
 ## Attribution, at source
 
-`.claude/settings.local.json` sets `attribution.pr` to `""` (next to the existing
-`attribution.commit`), so Claude Code does not append its footer to a PR body at all. The
-formatter's stripping is the second line of defence, for a body pasted or written by hand.
+`.claude/settings.json` sets `attribution.pr` to `""`, so Claude Code adds no footer. The
+formatter's stripping is the second line of defence.
 
-## Changing the format later
+## Changing the format
 
-The contract lives in two places and they must move together:
+Two places move together:
 
-1. `pr-body.py` — `CANON`, `ALIASES`, `BANNED_NAMES`, `HARD_BREAK`, the budgets
-   (`MAX_WORDS_HARD`, `MAX_CHECKS`, `WARN_WORDS`, `WARN_LINES`), and the one format string
-   in `format_body()` that renders the body. The validator follows automatically — it
-   compares against that render rather than repeating the rules.
-2. `DESCRIPTION.md` — what Claude is told to write.
+1. `pr-body.py` — `CANON`, `ALIASES`, `BANNED_NAMES`, `HARD_BREAK`, the limits
+   (`MAX_WORDS_HARD`, `MAX_CHECKS`, `MAX_IMAGES`, `MAX_TITLE`, `WARN_WORDS`, `WARN_LINES`), and
+   the format string in `format_body()`. The validator follows, because it compares against
+   that render.
+2. `DESCRIPTION.md` — the rules and the limits table.
 
-Then run the tests. Changing the rendered shape will fail
-`Formatter.test_produces_the_required_shape` and `test_idempotent` first — update those
-expectations deliberately, never by loosening the assertion.
-
-```bash
-python3 .claude/hooks/tests/test_pr_body.py          # 40 tests, ~5 ms, no dependencies
-```
-
-## Why this is deterministic and not a second Claude pass
-
-An LLM asked to "reformat this to the house style" is a fresh sample every time: it costs
-a round trip, it can drop a Check step, it can soften a sentence, and it can leave the
-footer in. The shape of a PR body has one right answer and no judgement in it, so it
-belongs in code that is testable, instant and identical every run. Judgement — what
-changed, why it mattered, how to verify it — stays with Claude, and is written once.
+Then run the tests. A shape change fails `Formatter.test_produces_the_required_shape` and
+`test_idempotent` first — update them deliberately, never by loosening the assertion.

@@ -2,8 +2,9 @@
 # Worktree-aware access to this workspace's Graphify maps.
 #
 # The problem this solves: there is not one graph in this workspace, there are
-# 1 + N per repo — the workspace map under docs/<repo>/architecture/, plus one
-# per ticket worktree under .work/<KEY>/<repo>/graphify-out/. They describe
+# 1 + N per repo — the workspace map in <repo>/graphify-out/ (whatever branch that
+# checkout is on), plus one per ticket worktree under .work/<KEY>/<repo>/graphify-out/.
+# They describe
 # DIFFERENT commits. Passing --graph by hand is how an agent gets a confident,
 # well-formatted answer about code the branch it is working on does not contain.
 #
@@ -14,6 +15,7 @@
 #   graph.sh status                          inventory: every repo + every worktree
 #   graph.sh resolve <path>                  which map describes <path>, and is it current
 #   graph.sh ensure  <path>                  rebuild that map if the code moved
+#   graph.sh refresh [--background]          ensure every stale map (hooks call this)
 #   graph.sh label   <path> [--full]         (re)name its communities
 #   graph.sh query   <path> "<question>" [..] ensure, then BFS traversal
 #   graph.sh affected <path> "<node>" [..]   ensure, then reverse traversal
@@ -27,6 +29,11 @@
 # graph built before an uncommitted edit is exactly as wrong as one built on
 # another branch. Rebuilds are incremental (~2-4s on this workspace), so ensure
 # runs on every query rather than being something to remember.
+#
+# Freshness lives in a stamp beside each map (<repo>/graphify-out/.graph-stamp, or
+# .work/<KEY>/meta/<repo>.graph). The tracked lodestar manifest is only read, as a
+# fallback for maps built before stamps existed — never written, so a rebuild does
+# not dirty the router repo.
 #
 # Exit: 0 ok | 1 usage/failure | 2 graphify CLI missing
 
@@ -55,6 +62,13 @@ stamp() {
   head=$(git -C "$d" rev-parse HEAD 2>/dev/null || echo none)
   dirty=$(git -C "$d" status --porcelain -uno 2>/dev/null | sha1sum | cut -c1-12)
   echo "$head:$dirty"
+}
+
+# primary_sha <repo> -> the commit the workspace map was built from (stamp, else manifest)
+primary_sha() {
+  local f="$ROOT/$1/graphify-out/.graph-stamp" s=""
+  [ -f "$f" ] && s=$(sed -n 's/^GRAPH_SHA=//p' "$f")
+  [ -n "$s" ] && echo "$s" || manifest_sha "$1"
 }
 
 manifest_sha() {
@@ -89,8 +103,8 @@ resolve() {
       for _r in $REPOS; do case "$p" in "$ROOT/$_r"|"$ROOT/$_r"/*) REPO="$_r";; esac; done
       [ -n "$REPO" ] || die "path is not inside a known repo or worktree: $p"
       TREE="$ROOT/$REPO"
-      GRAPH="$ROOT/docs/$REPO/architecture/graph.json"
-      STAMPFILE="$ROOT/docs/$REPO/architecture/.graph-stamp"
+      GRAPH="$TREE/graphify-out/graph.json"
+      STAMPFILE="$TREE/graphify-out/.graph-stamp"
       ;;
   esac
   [ -d "$TREE" ] || die "no tree at $TREE"
@@ -166,21 +180,32 @@ cmd_resolve() {
   [ "$STATE" = fresh ] || echo "        -> graph.sh ensure ${1:-.}  (or just query; query ensures first)"
 }
 
+# One rebuild per map at a time. A background refresh and a query can both find the
+# same map stale; the second waits, then re-resolves and finds it fresh.
 cmd_ensure() {
   resolve "${1:-.}"
+  [ "$STATE" = fresh ] || [ -n "${GRAPH_LOCK_HELD:-}" ] || {
+    mkdir -p "$(dirname "$STAMPFILE")"
+    GRAPH_LOCK_HELD=1 flock -w 300 "$STAMPFILE.lock" "$HOOKS/graph.sh" ensure "${1:-.}"
+    return $?
+  }
   [ "$STATE" = fresh ] && { echo "graph: fresh — ${GRAPH#"$ROOT"/} describes $(git -C "$TREE" rev-parse --short HEAD 2>/dev/null)$(git -C "$TREE" status --porcelain -uno 2>/dev/null | grep -q . && echo ' + local edits')"; return 0; }
   need_cli
   local log="${TMPDIR:-/tmp}/graph-ensure-$REPO${KEY:+-$KEY}.log"
 
   # A worktree whose HEAD is exactly the commit the workspace map was built from
-  # can copy it — same content, no extraction.
+  # can copy it — same content, no extraction. The label/analysis sidecars travel
+  # with graph.json or `query` answers with bare community integers.
+  local src="$ROOT/$REPO/graphify-out" f
   if [ "$SCOPE" = worktree ] && [ -z "$(git -C "$TREE" status --porcelain -uno 2>/dev/null)" ] \
-     && [ "$(manifest_sha "$REPO")" = "$(git -C "$TREE" rev-parse HEAD 2>/dev/null)" ] \
-     && [ -f "$ROOT/docs/$REPO/architecture/graph.json" ]; then
+     && [ "$(primary_sha "$REPO")" = "$(git -C "$TREE" rev-parse HEAD 2>/dev/null)" ] \
+     && [ -f "$src/graph.json" ]; then
     mkdir -p "$TREE/graphify-out"
-    cp "$ROOT/docs/$REPO/architecture/graph.json" "$TREE/graphify-out/graph.json"
-    write_stamp docs-map-copy
-    echo "graph: reused docs/$REPO/architecture/graph.json — built from this exact commit"
+    for f in graph.json GRAPH_REPORT.md .graphify_labels.json .graphify_labels.json.sig .graphify_analysis.json; do
+      [ -f "$src/$f" ] && cp "$src/$f" "$TREE/graphify-out/$f"
+    done
+    write_stamp workspace-map-copy
+    echo "graph: reused $REPO/graphify-out/graph.json — built from this exact commit"
     return 0
   fi
 
@@ -206,31 +231,6 @@ cmd_ensure() {
   write_stamp "$SCOPE-$mode"
   grep -iE 'nodes|edges|communities|updated' "$log" | tail -2
 
-  # The workspace map is the artefact other docs and skills point at, so keep it
-  # in step with its own checkout rather than letting it drift silently.
-  if [ "$SCOPE" = primary ]; then
-    mkdir -p "$ROOT/docs/$REPO/architecture"
-    # The label/analysis sidecars travel with graph.json or community names are lost:
-    # `query` reads labels from .graphify_labels.json beside the graph, so a copy without
-    # them answers with bare integers ("community=57") instead of "community=auth.js".
-    for f in graph.json graph.html GRAPH_REPORT.md              .graphify_labels.json .graphify_labels.json.sig .graphify_analysis.json; do
-      [ -f "$TREE/graphify-out/$f" ] && cp "$TREE/graphify-out/$f" "$ROOT/docs/$REPO/architecture/$f"
-    done
-    python3 - "$MANIFEST" "$REPO" "$(git -C "$TREE" rev-parse HEAD)" <<'PY'
-import json,sys,datetime
-p,repo,sha=sys.argv[1],sys.argv[2],sys.argv[3]
-try: m=json.load(open(p))
-except Exception: sys.exit(0)
-for r in m.get("repos",[]):
-    if r.get("name")==repo:
-        mp=r.setdefault("mapping",{})
-        mp["lastMappedSha"]=sha
-        mp["lastMappedAt"]=datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        mp["lastMappedBy"]="graph.sh ensure"
-        json.dump(m,open(p,"w"),indent=2); print(f"manifest: {repo}.mapping.lastMappedSha -> {sha[:7]}")
-        break
-PY
-  fi
   echo "graph: ${GRAPH#"$ROOT"/} now describes this tree"
 }
 
@@ -245,6 +245,31 @@ run_q() {
   graphify "$sub" "$@" --graph "$GRAPH"
 }
 
+# refresh [--background] -> ensure every stale or missing map, workspace and ticket.
+# Hooks call it so a map is current before the agent reaches for it, not only when
+# the agent remembers to query. GRAPH_REFRESH_ACTIVE stops the claude-cli labelling
+# pass from re-entering the hooks that started it.
+cmd_refresh() {
+  if [ "${1:-}" = "--background" ]; then
+    command -v graphify >/dev/null || return 0
+    GRAPH_REFRESH_ACTIVE=1 setsid nohup "$HOOKS/graph.sh" refresh \
+      >"${TMPDIR:-/tmp}/graph-refresh.log" 2>&1 </dev/null &
+    return 0
+  fi
+  export GRAPH_REFRESH_ACTIVE=1
+  local t d r trees=()
+  for r in $REPOS; do [ -d "$ROOT/$r" ] && trees+=("$ROOT/$r"); done
+  for d in "$WORK"/*/; do
+    [ -d "$d" ] || continue
+    for r in $REPOS; do [ -d "$d$r" ] && trees+=("${d%/}/$r"); done
+  done
+  for t in "${trees[@]}"; do
+    resolve "$t" 2>/dev/null || continue
+    [ "$STATE" = fresh ] && continue
+    cmd_ensure "$t" || echo "graph: refresh of ${t#"$ROOT"/} failed" >&2
+  done
+}
+
 cmd_label() {
   resolve "${1:-.}"
   need_cli
@@ -256,7 +281,7 @@ cmd_label() {
 cmd_status() {
   echo "## Graphify maps in this workspace"
   echo
-  echo "### Workspace maps — docs/<repo>/architecture/ (the repo's own checkout)"
+  echo "### Workspace maps — <repo>/graphify-out/ (the repo's own checkout)"
   for r in $REPOS; do
     [ -d "$ROOT/$r" ] || continue
     resolve "$ROOT/$r" 2>/dev/null || continue
@@ -285,10 +310,11 @@ case "${1:-}" in
   status)   shift; cmd_status "$@" ;;
   resolve)  shift; cmd_resolve "$@" ;;
   ensure)   shift; cmd_ensure "$@" ;;
+  refresh)  shift; cmd_refresh "$@" ;;
   label)    shift; cmd_label  "$@" ;;
   query)    shift; run_q query "$@" ;;
   affected) shift; run_q affected "$@" ;;
   explain)  shift; run_q explain "$@" ;;
   path)     shift; run_q path "$@" ;;
-  *) die "usage: graph.sh {status|resolve|ensure|label|query|affected|explain|path} [<path>] [args]" ;;
+  *) die "usage: graph.sh {status|resolve|ensure|refresh|label|query|affected|explain|path} [<path>] [args]" ;;
 esac
