@@ -15,6 +15,7 @@
 #   graph.sh status                          inventory: every repo + every worktree
 #   graph.sh resolve <path>                  which map describes <path>, and is it current
 #   graph.sh ensure  <path>                  rebuild that map if the code moved
+#   graph.sh refresh [--background]          ensure every stale map (hooks call this)
 #   graph.sh label   <path> [--full]         (re)name its communities
 #   graph.sh query   <path> "<question>" [..] ensure, then BFS traversal
 #   graph.sh affected <path> "<node>" [..]   ensure, then reverse traversal
@@ -179,8 +180,15 @@ cmd_resolve() {
   [ "$STATE" = fresh ] || echo "        -> graph.sh ensure ${1:-.}  (or just query; query ensures first)"
 }
 
+# One rebuild per map at a time. A background refresh and a query can both find the
+# same map stale; the second waits, then re-resolves and finds it fresh.
 cmd_ensure() {
   resolve "${1:-.}"
+  [ "$STATE" = fresh ] || [ -n "${GRAPH_LOCK_HELD:-}" ] || {
+    mkdir -p "$(dirname "$STAMPFILE")"
+    GRAPH_LOCK_HELD=1 flock -w 300 "$STAMPFILE.lock" "$HOOKS/graph.sh" ensure "${1:-.}"
+    return $?
+  }
   [ "$STATE" = fresh ] && { echo "graph: fresh — ${GRAPH#"$ROOT"/} describes $(git -C "$TREE" rev-parse --short HEAD 2>/dev/null)$(git -C "$TREE" status --porcelain -uno 2>/dev/null | grep -q . && echo ' + local edits')"; return 0; }
   need_cli
   local log="${TMPDIR:-/tmp}/graph-ensure-$REPO${KEY:+-$KEY}.log"
@@ -237,6 +245,31 @@ run_q() {
   graphify "$sub" "$@" --graph "$GRAPH"
 }
 
+# refresh [--background] -> ensure every stale or missing map, workspace and ticket.
+# Hooks call it so a map is current before the agent reaches for it, not only when
+# the agent remembers to query. GRAPH_REFRESH_ACTIVE stops the claude-cli labelling
+# pass from re-entering the hooks that started it.
+cmd_refresh() {
+  if [ "${1:-}" = "--background" ]; then
+    command -v graphify >/dev/null || return 0
+    GRAPH_REFRESH_ACTIVE=1 setsid nohup "$HOOKS/graph.sh" refresh \
+      >"${TMPDIR:-/tmp}/graph-refresh.log" 2>&1 </dev/null &
+    return 0
+  fi
+  export GRAPH_REFRESH_ACTIVE=1
+  local t d r trees=()
+  for r in $REPOS; do [ -d "$ROOT/$r" ] && trees+=("$ROOT/$r"); done
+  for d in "$WORK"/*/; do
+    [ -d "$d" ] || continue
+    for r in $REPOS; do [ -d "$d$r" ] && trees+=("${d%/}/$r"); done
+  done
+  for t in "${trees[@]}"; do
+    resolve "$t" 2>/dev/null || continue
+    [ "$STATE" = fresh ] && continue
+    cmd_ensure "$t" || echo "graph: refresh of ${t#"$ROOT"/} failed" >&2
+  done
+}
+
 cmd_label() {
   resolve "${1:-.}"
   need_cli
@@ -277,10 +310,11 @@ case "${1:-}" in
   status)   shift; cmd_status "$@" ;;
   resolve)  shift; cmd_resolve "$@" ;;
   ensure)   shift; cmd_ensure "$@" ;;
+  refresh)  shift; cmd_refresh "$@" ;;
   label)    shift; cmd_label  "$@" ;;
   query)    shift; run_q query "$@" ;;
   affected) shift; run_q affected "$@" ;;
   explain)  shift; run_q explain "$@" ;;
   path)     shift; run_q path "$@" ;;
-  *) die "usage: graph.sh {status|resolve|ensure|label|query|affected|explain|path} [<path>] [args]" ;;
+  *) die "usage: graph.sh {status|resolve|ensure|refresh|label|query|affected|explain|path} [<path>] [args]" ;;
 esac

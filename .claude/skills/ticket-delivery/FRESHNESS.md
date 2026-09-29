@@ -105,7 +105,9 @@ Query by tree path only, never with `--graph`:
 ```
 
 `graph.sh` re-checks the map against HEAD and the dirty tree on every query and rebuilds it
-first (~3s), so it cannot go stale mid-task. An agent that cannot reach the map reads source
+first (~3s), so it cannot go stale mid-task. Hooks also rebuild stale maps in the background,
+at session start and on any prompt that asks for code work (implement, investigate, fix, a
+ticket key), so the first query rarely waits. An agent that cannot reach the map reads source
 instead.
 
 **The graph locates; the file confirms.** Labels may be missing; there are no cross-repo

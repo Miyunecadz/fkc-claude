@@ -53,6 +53,11 @@
             "type": "command",
             "timeout": 5,
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/plain-uk-english.sh\""
+          },
+          {
+            "type": "command",
+            "timeout": 5,
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/graph-freshen.sh\""
           }
         ]
       }
