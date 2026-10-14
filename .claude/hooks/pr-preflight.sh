@@ -21,7 +21,7 @@ set -uo pipefail
 HOOKS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HOOKS/../.." && pwd)"
 WORK="$ROOT/.work"
-REPOS="fk-admin-panel-be fk-admin-panel-fe fk-mobile"
+REPOS="fk-admin-panel-be fk-admin-panel-fe fk-mobile automation-testing"
 
 valid_repo() { for r in $REPOS; do [ "$r" = "$1" ] && return 0; done; return 1; }
 valid_key()  { echo "$1" | grep -qE '^[A-Za-z][A-Za-z0-9]*-[0-9]+$'; }

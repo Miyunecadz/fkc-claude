@@ -1,12 +1,13 @@
 # fk-connect — Workspace Router
 
-A Lodestar workspace: three independent repos coordinated from one root. This file routes; skills hold the detail and load on demand.
+A Lodestar workspace: four independent repos coordinated from one root. This file routes; skills hold the detail and load on demand.
 
 ## Repositories
 
 - **fk-admin-panel-be** — GraphQL API, DB and auth owner (Node/Express, Apollo Server, MariaDB via dbmate, Redis/Bull, cron).
 - **fk-admin-panel-fe** — Admin web client (React 18 on CRACO, Apollo Client, ag-grid, Tailwind).
 - **fk-mobile** — Mobile app (React Native, Apollo Client, NativeWind, Firebase messaging).
+- **automation-testing** — Standalone Playwright E2E suite (pnpm, TypeScript). Black-box against FE `:3000` + GraphQL API `:4000`; imports no FE/BE source. Its own `playwright-standards` skill and `docs/automation-testing/`.
 
 The root is its own git repo that ignores the three repos. Always run git as `git -C <repo> …`.
 
@@ -33,6 +34,13 @@ Start at `docs/repo-map.md`. The contract doc is `docs/_shared/api-contract.md`;
 ## Writing style
 
 British English, plain words, short sentences, answer first. Rules: `.claude/skills/plain-uk-english/SKILL.md`.
+
+## Working conventions
+
+Two team conventions every repo shares. Read the detail in the named skill.
+
+- **Branch keys come from Trello, not Jira.** Branches, commit subjects and `.work/<KEY>/` directories use the Trello card number and slug (e.g. `feat/FKC-281-no-series-subcontract-series-backend`), even though they keep the `FKC-` prefix. Read the requirement from Jira, but confirm the Trello card number before naming a branch or worktree — a Jira-keyed branch is invisible to the PM. Detail: `ticket-delivery` skill.
+- **Change only the ticket's own code.** In files that predate the branch, adding new functions or exports is fine; modifying, re-indenting or reordering code written by others is not — even when it looks like an improvement. Put other cleanups in the report as follow-ups. Detail: the repo's standards skill.
 
 ## Enforcement
 

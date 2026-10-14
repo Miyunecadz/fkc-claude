@@ -49,6 +49,6 @@ Create `./.claude/lodestar.manifest.json`:
 
 ## 7. Report and suggest next steps
 Summarize what was created. Then tell the user to run, for each repo:
-`/lodestar-onboard ./<repo>` — followed by `/lodestar-guardrails` and `/lodestar-agents` once repos are onboarded.
+`/lodestar-onboard ./<repo>` — followed by `/lodestar-guardrails` once repos are onboarded. (This workspace uses hand-authored, skill-backed agents in `.claude/agents/`, not catalogue generation.)
 
 Do not create guardrails or agents here — those are separate, opt-in commands.

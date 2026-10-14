@@ -21,8 +21,11 @@ run time, do not load it** unless you are changing `pr-body.py`.
 
 ## 1. Where the change lives
 
-A ticket driven through `/implement-ticket` is already committed on its branch. Which
-checkout holds it depends on the mode chosen there (`ticket-delivery` → `WORKTREE.md`):
+A ticket reaches here **reviewed but not committed** (`state: REVIEWED`); this flow commits it
+locally before drafting, so `pr-author` has a real diff. The commit is reversible and stays on
+the machine — only the push and PR wait for the gate. A re-run may find it already committed
+(`HANDED_OVER`): then it does not commit again. Which checkout holds the change depends on the
+mode chosen in `/implement-ticket` (`ticket-delivery` → `WORKTREE.md`):
 
 ```
 .work/<KEY>/meta/<repo>.env  MODE / BASE_REF / BASE_SHA / BRANCH — what it was cut from
@@ -123,9 +126,11 @@ user approves. An approval for one repo is not an approval for the other.
 
 In order, per repo, all with the literal path:
 
-1. Stage by explicit path, only if something is uncommitted. Commit: one line,
-   conventional prefix (`feat:` / `fix:` / `refactor:` / `chore:`), no body, no trailers —
-   a hook enforces it.
+1. **Commit — normally already done before the gate** (§1; the command commits in its own §2
+   so `pr-author` has a diff). These are the mechanics either way: stage by explicit path,
+   only if something is uncommitted; one commit, one line, conventional prefix (`feat:` /
+   `fix:` / `refactor:` / `chore:`), no body, no trailers — a hook enforces it. Never amend an
+   existing commit.
 2. Push: the exact command the preflight printed.
 3. Confirm the remote carries the commit — one call, the two hashes must match:
    `git -C <path> ls-remote origin refs/heads/<branch> && git -C <path> rev-parse HEAD`

@@ -36,12 +36,17 @@ given.
 ## Method
 
 1. Load your repo's standards skill (`backend-standards`, `frontend-standards`,
-   `mobile-standards`), and `graphql-contract` if the slice touches the API.
+   `mobile-standards`, or `playwright-standards` for automation-testing), and
+   `graphql-contract` if the slice touches the API. Obey its **Readability and house style**
+   rules (in `playwright-standards`, the `Comments` and `Naming & location` sections).
 2. Reuse before creating. Confirm the thing the plan names exists **in this tree**.
 3. Copy the nearest similar file's structure. The backend merges typedefs and resolvers by
    directory and filename; the clients use import aliases, not `../*`.
 4. Make the smallest change that satisfies the plan, then re-read it.
 5. Backend only: `node --check <file>` on each changed file. No builds.
+6. Re-read your diff as a stranger: delete any comment that restates the code, any
+   commented-out line, any abbreviated name the surrounding file spells out, and any debug
+   output. Code only you can read fails review.
 
 ## Report — 30 lines maximum
 

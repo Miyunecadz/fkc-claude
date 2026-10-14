@@ -20,7 +20,7 @@ merge.
 
 | Rule | Limit |
 |---|---|
-| `Bash` calls | 14 for the whole run |
+| `Bash` calls | 20 for the whole run (it now commits before the draft) |
 | Bitbucket calls | 5 — the fixed list in `BITBUCKET.md` |
 | Diff reads in this thread | 0 — `pr-author` reads it |
 | `change-reviewer` runs | 0 — missing review is a stop, not work to pick up |
@@ -33,12 +33,18 @@ You have no `Edit` and no `Write`. `pr-author` writes the draft; `pr-body.py` sh
 ## 1. Resolve the change
 
 ```bash
-.claude/hooks/ticket-worktree.sh list && .claude/hooks/pr-preflight.sh <KEY> [repo]
+.claude/hooks/ticket-worktree.sh list
+.claude/hooks/ticket-worktree.sh tree <KEY> <repo>   # the literal path for every git command
 ```
 
 Read `.work/<KEY>/work.md` and the Jira issue once with `mcp__jira__jira_get_issue`.
-`state:` must be `REVIEWED` or `HANDED_OVER`; earlier → say which stage is missing and stop.
-`PR_OPEN` → verify the existing PR, do not open a second.
+`state:` must be `REVIEWED` (the change is reviewed but **not yet committed** — this command
+commits it) or `HANDED_OVER` (already committed in an earlier `/create-pr` run — resume at the
+draft); earlier → say which stage is missing and stop. `PR_OPEN` → verify the existing PR, do
+not open a second.
+
+The preflight runs later, in §3, **after** the commit — an uncommitted tree gives `pr-author`
+an empty diff range.
 
 `state:` is local, so check the issue too — the ticket may have been delivered from
 another machine:
@@ -54,25 +60,46 @@ no ticket, and get the requirement from the user. Never infer one from the diff.
 
 Preflight exit 1 → relay the `!` lines and stop.
 
-## 2. Draft — dispatch, do not read the diff
+## 2. Review and validation must be real, then commit
+
+Check both on the reviewed, **uncommitted** tree, before committing:
+
+- **Review**: the sidecar's `## Review` with `REVIEWED`, or a `change-reviewer` run earlier in
+  this session. None, or an unresolved blocking finding → stop and send the user to
+  `/implement-review <KEY>`. Never spawn `change-reviewer` here.
+- **Validation**: compare the sha in `## Validate` with the tree's current HEAD
+  (`git -C <path> rev-parse HEAD`). Same → the result stands; cite it. Different → dispatch
+  `ticket-validator` for that repo only, with the checks affected (`ticket-delivery` →
+  `VALIDATION.md`). A check that did not run is never reported as passing.
+
+Then **commit** (skip entirely if `state:` is already `HANDED_OVER` — an earlier run did it):
+
+- `.claude/hooks/ticket-freshness.sh check <KEY>` (exit 0 or 4 to go on; 3 base moved or 5
+  unknown → stop).
+- Commit per repo by `ticket-delivery` SKILL §8 and `pull-request` SKILL §7.1/§9: stage **by
+  explicit path**, one commit, one-line conventional subject, no body, no trailer, with a
+  literal `git -C <path>`. Append `## Handover` with `HANDED_OVER`.
+- Nothing to commit (the dev already committed) is normal: say so, never amend their commit.
+
+The commit is local and reversible; it does not leave the machine. The push and PR stay
+behind the gate in §4.
+
+## 3. Preflight and draft — do not read the diff
+
+```bash
+.claude/hooks/pr-preflight.sh <KEY> [repo]
+```
+
+Preflight exit 1 → relay the `!` lines and stop. It now sees the commit from §2, so the diff
+range it prints is non-empty.
 
 Dispatch one `pr-author` per repo, **all in one message**, and wait for all of them. Give
-each only: repo, the literal path, branch, destination, the diff range the preflight
-printed, the ticket key (or "none"), the Trello card URL from the sidecar's `ticket:`
-header (or "none"), and `<pr-dir>`. It writes `<pr-dir>/<repo>.title` and
-`<pr-dir>/<repo>.txt` and returns the paths, the title and its flags.
+each only: repo, the literal path, branch, destination, the diff range the preflight printed,
+the ticket key (or "none"), the Trello card URL from the sidecar's `ticket:` header (or
+"none"), and `<pr-dir>`. It writes `<pr-dir>/<repo>.title` and `<pr-dir>/<repo>.txt` and
+returns the paths, the title and its flags.
 
 A `stop:` line, a secret flag or an out-of-scope change ends the run — report it.
-
-## 3. Review and validation must be real
-
-- **Review**: the sidecar's `## Review`, or a `change-reviewer` run earlier in this
-  session. None, or an unresolved blocking finding → stop and send the user to
-  `/implement-review <KEY>`. Never spawn `change-reviewer` here.
-- **Validation**: compare the preflight's `branch: <b> @ <sha>` with the sha in
-  `## Validate`. Same → the result stands; cite it. Different → dispatch `ticket-validator`
-  for that repo only, with the checks affected (`ticket-delivery` → `VALIDATION.md`). A
-  check that did not run is never reported as passing.
 
 ## 4. Format, then the gate
 
@@ -82,8 +109,14 @@ Run the skill's §5 format-and-title command for each repo, then
 
 ## 5. Execute and deliver
 
-Follow skill §7 for each repo (backend first), then §10 (delivery comment and
-fingerprint), then §11 (sidecar and report). Never dispatch an agent after the gate.
+The commit is already made (§2), so skill §7 step 1 is a no-op — start at the push. Follow
+skill §7 steps 2–5 for each repo (backend first): push, confirm the remote carries it, create
+the PR, verify it. Then §10 (delivery comment and fingerprint), then §11 (sidecar and report).
+Never dispatch an agent after the gate.
+
+In the report, point the user at `/capture-evidence <KEY>` to screenshot the change working
+and save it under `.work/<KEY>/shots/` for the PR — the Bitbucket API cannot attach a PR image,
+so a human uploads the files.
 
 ## 6. Offer to reap the worktree
 

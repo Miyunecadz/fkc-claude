@@ -26,3 +26,16 @@ and you fix the doc in the same change.
   `src/components/molecules/custom-table.jsx` rather than new grid wiring.
 - **Checks:** `yarn lint` (`.eslintrc.js`), `yarn build`. Prettier config in
   `.prettierrc.js`. Tests are thin: one unit test plus Playwright `browser.test.ts`.
+
+**Readability and house style**
+
+- Match the nearest similar file: its naming, casing, import style, file shape and
+  comment density. Copy the pattern; do not invent one.
+- Full words for names — `index`, `response`, `connection` — unless the surrounding file
+  already uses the short form. The file's own idiom wins.
+- A comment says *why*, and only where the nearby code already comments. Never a comment
+  that restates what the line does. No commented-out code, no `TODO`/`FIXME`, no
+  `console.log` left behind.
+- Nothing the task did not need: no scaffolding, no example code, no narration of the work.
+- Re-read the diff as a stranger. Delete any line that only explains the code, or shortens
+  a name the file spells out.

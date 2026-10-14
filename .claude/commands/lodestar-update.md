@@ -59,7 +59,6 @@ Run the installer for the target version. Never hand-copy files yourself — `in
 - Compare the refreshed catalog against the manifest's enabled ids: list any **new catalog entries** (guardrails / agents / skills) now available that the workspace hasn't adopted. This is the key value — the user won't see new rules/agents until they opt in.
 - Recommend the follow-ups only where relevant:
   - New or changed **guardrails** → re-run `/lodestar-guardrails` and tick them.
-  - New or changed **agents** → re-run `/lodestar-agents`.
   - New **stack skills** → re-run `/lodestar-onboard ./<repo>` for the affected repo.
   - **Freshness** available but not enabled (no `freshness` key in the manifest) → suggest `/lodestar-freshness` to keep architecture maps in sync with the code.
 - Remind the user their existing rules/agents/docs were left exactly as they were; updating the catalog never regenerates them silently — adoption is always an explicit re-run. Mention `/lodestar-update <old-version>` as the way back if a new version misbehaves.

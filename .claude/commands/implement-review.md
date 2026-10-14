@@ -1,5 +1,5 @@
 ---
-description: Validate, independently review and commit a ticket's implementation after a human has read it — reports blocking findings, never fixes them
+description: Re-validate and independently review a ticket's implementation after hand edits or a --pause — reports blocking findings, never fixes or commits them
 argument-hint: <FKC-123 | ticket key> (omit to list ticket workspaces in flight)
 allowed-tools: Task, Agent, SendMessage, Bash, Read, AskUserQuestion, Skill, mcp__jira__jira_get_issue
 effort: high   # an independent review gate, and the commit
@@ -10,12 +10,14 @@ Validate and review the implementation for:
 $ARGUMENTS
 
 Load the `ticket-delivery` skill first. It owns every rule: states and resume (§3), budget
-and the never-here table (§5), stop conditions (§7), commit rules (§8). This file is the
-order of steps.
+and the never-here table (§5), stop conditions (§7). This file is the order of steps.
 
-This runs after `/implement-ticket` and after a human has read, and usually tweaked, the
-code. **It has no implementer: findings are reported, never fixed.** You have no `Edit` or
-`Write`, and you never read source, diffs or logs.
+This is the **re-entry** after a human has read, and usually tweaked, the code — whether the
+code was hand-edited after a normal run, or `/implement-ticket --pause` stopped at
+`IMPLEMENTED` for a read. `/implement-ticket` already runs Validate and Review itself; use
+this to re-run them over hand edits. **It has no implementer and never commits: findings are
+reported, never fixed.** You have no `Edit` or `Write`, and you never read source, diffs or
+logs. Nothing is committed here — that happens in `/create-pr`.
 
 ## 1. Locate and gate
 
@@ -65,22 +67,18 @@ Review sections so far), and this instruction verbatim:
 When it returns, check that `.work/<KEY>/review/<n>.md` exists (`test -s`). If it does not,
 record that in the Review section.
 
-- `VERDICT: PASS` → append `## Review` with `REVIEWED`.
+- `VERDICT: PASS` → append `## Review` with `REVIEWED`, then stop and point at
+  `/create-pr <KEY>`. Nothing is committed here.
 - `VERDICT: FAIL` → append `## Review` with `REVIEW_FAILED` and stop. Give the two routes:
   fix by hand and re-run `/implement-review <KEY>`, or `/implement-ticket <KEY>` for the one
   agent fix round.
 - `VERDICT: STALE BASE` → `sidecar state <KEY> BLOCKED "base moved during review"`, stop.
 
-## 4. Commit
-
-Only on `REVIEWED`. Run `ticket-freshness.sh check <KEY>` again (exit 0 or 4 to go on), then
-commit per repo by SKILL §8. Append `## Handover` with `HANDED_OVER`.
-
-Do not push, open a PR or touch Jira. Next step is `/create-pr <KEY>`.
-
-## 5. Report
+## 4. Report
 
 Short: key, state reached, per repo the branch and tree path; the checks that ran with their
 results and what did not run and why (say `UNVERIFIED` plainly when it applies); the review
-verdict and report path; what a human must still check by hand; the next step; the push
-line from SKILL §8.
+verdict and report path; what a human must still check by hand; the next step
+(`/create-pr <KEY>`, which commits and opens the PR); the push line from SKILL §8.
+
+Nothing is committed in this command. The commit happens in `/create-pr`, behind its gate.

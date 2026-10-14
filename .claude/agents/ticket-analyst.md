@@ -32,9 +32,9 @@ does not settle something, that is an `UNKNOWN`, never a guess.
    the path is missing or not a git checkout, stop (see When to stop). If HEAD is not the
    given base sha, or the tree is dirty, carry on and say so in the `REPO` line.
 2. Load the repo's standards skill with Skill: `backend-standards` for fk-admin-panel-be,
-   `frontend-standards` for fk-admin-panel-fe, `mobile-standards` for fk-mobile. Load
-   `graphql-contract` too only if the requirement adds or changes a typedef, query,
-   mutation, input or permission.
+   `frontend-standards` for fk-admin-panel-fe, `mobile-standards` for fk-mobile,
+   `playwright-standards` for automation-testing. Load `graphql-contract` too only if the
+   requirement adds or changes a typedef, query, mutation, input or permission.
 3. Decide whether this repo owns any part of the requirement. If it names only another
    repo's surface (a label on a web screen sent to the backend), confirm with one Grep of
    the tree for the named label or field, return the no-change report (see Output) and

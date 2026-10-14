@@ -12,6 +12,7 @@ Run everything from the ticket's tree (`ticket-worktree.sh tree <KEY> <repo>`).
 | `fk-admin-panel-be` | `node --check <file>` for every changed JS file; the boot below when typedefs or permissions changed; `yarn db:status` after a migration | `yarn test` is `echo "Error: no test specified" && exit 1`. There is no ESLint or Prettier config |
 | `fk-admin-panel-fe` | `yarn lint` (`eslint src`); `yarn build` (craco) | `yarn test` — one test file in `src/`, proves nothing about a change elsewhere. `test:chrome`/`firefox`/`safari` open a browser and pause |
 | `fk-mobile` | none runnable: no `node_modules` | `yarn lint` and `yarn test` need an install. Never start one |
+| `automation-testing` | `pnpm typecheck` (`tsc --noEmit`); `pnpm lint` (`eslint .`) — both run offline, `node_modules` is present | `pnpm test` (`playwright test`) needs the FE on `:3000` and the GraphQL API on `:4000` running. Never start the stack to run it |
 
 ## Backend boot
 
