@@ -178,6 +178,18 @@ thing the rule covers.
 - Do not change `executeSqlQuery`, `filterSqlBuilder`, `shield.js` options or
   `src/utils/queue.js` unless the task asks. Report problems you see in them instead.
 
+**Readability and house style**
+- Match the nearest similar file: its naming, casing, import style, file shape and
+  comment density. Copy the pattern; do not invent one.
+- Full words for names — `index`, `response`, `connection` — unless the surrounding file
+  already uses the short form. The file's own idiom wins.
+- A comment says *why*, and only where the nearby code already comments. Never a comment
+  that restates what the line does. No commented-out code, no `TODO`/`FIXME`, no
+  `console.log` left behind.
+- Nothing the task did not need: no scaffolding, no example code, no narration of the work.
+- Re-read the diff as a stranger. Delete any line that only explains the code, or shortens
+  a name the file spells out.
+
 ## 5. Before you say done
 
 1. Run `node --check <file>` on every changed `.js` file. It checks syntax only.

@@ -6,14 +6,14 @@ stacks: [all]
 
 # Ticket delivery
 
-Carry a Jira ticket to a validated, reviewed, committed change on a branch. Two commands,
-with a human pause between them:
+Carry a Jira ticket to a validated, reviewed change on a branch, committed only at the PR.
+`/implement-ticket` runs the whole build through review; `/implement-review` re-runs
+validation and review over a human's hand edits; `/create-pr` commits and opens the PR:
 
 ```
-/implement-ticket   Locate (+images) → Prepare → Analyse → Plan → [approve] → Implement   ends IMPLEMENTED
-      ── the dev reads the diff, and normally tweaks it by hand ──
-/implement-review   Validate → Review → Handover (commit)                                 ends HANDED_OVER
-/create-pr          push → PR → the ticket's delivery comment                             ends PR_OPEN
+/implement-ticket   Locate (+images) → Prepare → Analyse → Plan → [approve] → Implement → Validate → Review   ends REVIEWED
+      ── --pause stops at IMPLEMENTED for a read; /implement-review re-runs Validate → Review over hand edits ──
+/create-pr          commit → push → PR → the ticket's delivery comment                                          ends PR_OPEN
 ```
 
 This skill is the one owner of the rules. The commands are orchestration and point here.
@@ -118,14 +118,20 @@ a sha, one decisive output line), not prose, not ticket text, not diffs.
 | Plan | main thread | files per repo, pattern, order, contract, checks, out of scope | `PLANNED` | — |
 | **Approval** | the user | the decision, verbatim | `APPROVED` or `NOT_APPROVED` | **nothing is edited before this** |
 | Implement | `ticket-implementer`, one per repo | the change | `IMPLEMENTING` → `IMPLEMENTED` | plan followed, or the deviation recorded |
-| **Human read** | the dev | their own tweaks | `IMPLEMENTED` | `/implement-ticket` ends here |
+| **Human read** (optional) | the dev | their own tweaks | `IMPLEMENTED` | only with `--pause`: `/implement-ticket --pause` ends here; resume with `/implement-review` |
 | Validate | `ticket-validator`, one per repo, parallel | prepared vs observed checks | `VERIFIED`, `UNVERIFIED` or `FAILED_VERIFICATION` | no check failed |
 | Review | `change-reviewer`, mode `gate`, one | verdict, one row per AC | `REVIEWED` or `REVIEW_FAILED` | verdict PASS |
-| Handover | main thread | one commit per repo | `HANDED_OVER` | — |
+| Commit | main thread **in `/create-pr`** | one commit per repo | `HANDED_OVER` | before the push gate |
 
-**The reviewer reports; it never fixes.** `/implement-review` has no implementer, so the
-dev's hand edits are never rewritten under them. A failed review leaves two routes: fix by
-hand and re-run `/implement-review`, or re-run `/implement-ticket` for one agent fix round.
+By default `/implement-ticket` runs straight through to `REVIEWED`: Implement flows into
+Validate and Review with no manual hand-off. `--pause` stops it at `IMPLEMENTED` for a human
+read, resumed by `/implement-review`. **Nothing is committed until `/create-pr`.**
+
+**A failed review:** in `/implement-ticket` it triggers the one allowed agent fix round
+automatically (re-validate and re-review follow). In `/implement-review` — the re-entry after
+hand edits — it reports and leaves two routes: fix by hand and re-run `/implement-review`, or
+re-run `/implement-ticket` for the agent fix round. `/implement-review` has no implementer of
+its own, so a dev's hand edits are never rewritten under them.
 
 **Fix rounds: one per approved plan.** The hook refuses a third Implement section. A finding
 still standing after the fix round is recorded with `sidecar state <KEY> BLOCKED` and goes
@@ -141,8 +147,9 @@ plan no longer describes it. The AC is the yardstick that survives.
 | `/implement-ticket` Locate | read in full, fingerprint recorded | — |
 | `/implement-ticket` before presenting the Plan | — | `check` |
 | `/implement-ticket` before Implement | re-read and compare | `check` |
+| `/implement-ticket` before Validate (unless `--pause`) | — | `check` |
 | `/implement-review` entry | re-read and compare, never re-record | `check` |
-| `/implement-review` before the commit | — | `check` |
+| `/create-pr` before the commit | — | `check` |
 
 What each verdict forces: [`FRESHNESS.md`](./FRESHNESS.md).
 
@@ -157,12 +164,12 @@ What each verdict forces: [`FRESHNESS.md`](./FRESHNESS.md).
 | `PLANNED` | plan written, not approved | present the plan again, wait | not ready, stop |
 | `APPROVED` | user approved | Implement | not ready, stop |
 | `IMPLEMENTING` | a run died mid-Implement | run `status`; re-dispatch the repos with no Implement row | not ready, stop |
-| `IMPLEMENTED` | code written, nothing judged | nothing to do: point at `/implement-review` | **normal entry**: Validate |
+| `IMPLEMENTED` | code written, nothing judged | continue: Validate, then Review (run-through). `--pause` stops here | **normal entry**: Validate |
 | `FAILED_VERIFICATION` | a check failed | fix round | re-validate (the dev fixed it by hand) |
-| `UNVERIFIED` | checks ran clean but none could speak to the change, or none exist (`fk-mobile`) | point at `/implement-review` | Review, then say plainly nothing automated verified it |
-| `VERIFIED` | every applicable check ran and passed | point at `/implement-review` | re-validate (the tree may have moved), then Review |
-| `REVIEW_FAILED` | reviewer returned FAIL | fix round | re-validate, then re-review (the dev fixed it by hand) |
-| `REVIEWED` | reviewer returned PASS; not committed | point at `/implement-review` | re-check git freshness, then commit |
+| `UNVERIFIED` | checks ran clean but none could speak to the change, or none exist (`fk-mobile`) | continue to Review, then say plainly nothing automated verified it | Review, then say plainly nothing automated verified it |
+| `VERIFIED` | every applicable check ran and passed | continue to Review | re-validate (the tree may have moved), then Review |
+| `REVIEW_FAILED` | reviewer returned FAIL | fix round (automatic in the run-through) | re-validate, then re-review (the dev fixed it by hand) |
+| `REVIEWED` | reviewer returned PASS; not committed | point at `/create-pr` | point at `/create-pr` |
 | `HANDED_OVER` | committed in the tree | stop: point at `/create-pr` | stop: point at `/create-pr` |
 | `PR_OPEN` | PR open, delivery comment written | stop | stop |
 | `NOT_NEEDED`, `ALREADY_IMPLEMENTED`, `NOT_APPROVED` | ended without a change, reason in the last section | report the reason, stop. Restart only if the user asks | same |
@@ -188,7 +195,8 @@ every repo has validated; anything in a user checkout the ticket was not given i
 The main thread reads the Jira issue, the sidecar and the agents' reports. It never reads
 source, diffs or build logs.
 
-**Budget:** `/implement-ticket` 25 `Bash` calls, `/implement-review` 15, per run. Count at
+**Budget:** `/implement-ticket` 35 `Bash` calls (it runs through Validate and Review),
+`/implement-review` 15, per run. Count at
 each stage boundary. Past it, stop, report where you are and what is left, and let the user
 decide. This overrides the session's general advice to read with `cat` and edit with
 heredocs: here, reading and editing are always delegated.
@@ -235,8 +243,8 @@ instead of the file.
   `src/utils/permissions/`; client operations in `fk-admin-panel-fe/src/graphql/` and
   `fk-mobile/src/graphql/`. Migrations: `fk-admin-panel-be/db/migrations/`.
 - When writing a repo's code, load its standards skill (`backend-standards`,
-  `frontend-standards`, `mobile-standards`) and nothing else, plus `graphql-contract` when
-  the change crosses the API.
+  `frontend-standards`, `mobile-standards`, or `playwright-standards` for automation-testing)
+  and nothing else, plus `graphql-contract` when the change crosses the API.
 
 ## 7. Stop conditions
 
@@ -257,7 +265,9 @@ Never stash, reset, check out over or discard anything in a user's checkout.
 
 ## 8. Handover
 
-Only after `VERDICT: PASS`, in `/implement-review`. Per repo, inside the tree:
+Only after `VERDICT: PASS`, in `/create-pr`, before its push gate — never in
+`/implement-ticket` or `/implement-review`, which leave the change uncommitted. Per repo,
+inside the tree:
 
 - stage **by explicit path** — never `git add -A`, `git add .` or `git commit -a`; in-place,
   anything in `git status` that is not this ticket's is a stop;
@@ -267,8 +277,8 @@ Only after `VERDICT: PASS`, in `/implement-review`. Per repo, inside the tree:
   a reason for `--no-verify`;
 - nothing to commit (the dev already committed) is normal: say so, never amend their commit.
 
-Never push, open a PR or change the Jira issue here. Those go through `/create-pr` and its
-own approval gate.
+Never push, open a PR or change the Jira issue here. The push, PR and Jira delivery comment
+follow later in `/create-pr`, after this commit and behind its own approval gate.
 
 Report in the state vocabulary above, never "done". The report and the `## Handover`
 section carry: files changed per repo with branch and tree path; checks run and their result

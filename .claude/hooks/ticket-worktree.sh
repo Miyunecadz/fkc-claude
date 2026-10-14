@@ -57,7 +57,7 @@ set -uo pipefail
 HOOKS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HOOKS/../.." && pwd)"
 WORK="${TICKET_WORK_DIR:-$ROOT/.work}"
-REPOS="fk-admin-panel-be fk-admin-panel-fe fk-mobile"
+REPOS="fk-admin-panel-be fk-admin-panel-fe fk-mobile automation-testing"
 
 die() { echo "$1" >&2; exit "${2:-1}"; }
 

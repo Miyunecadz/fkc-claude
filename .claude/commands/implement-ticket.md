@@ -1,6 +1,6 @@
 ---
-description: Drive a Jira ticket (FKC) through analysis, planning and implementation — in an isolated git worktree per repo, stopping at IMPLEMENTED so a human can read the code before anything is validated, reviewed or committed
-argument-hint: <FKC-123 | ticket key or summary substring> (omit to list ticket workspaces in flight)
+description: Drive a Jira ticket (FKC) through analysis, planning, implementation, validation and review — in an isolated git worktree per repo, running through to REVIEWED, or stopping at IMPLEMENTED with --pause for a human read, before anything is committed
+argument-hint: <FKC-123 | ticket key or summary substring> [--pause] [--in-place] (omit to list ticket workspaces in flight)
 allowed-tools: Task, Agent, SendMessage, Bash, Read, AskUserQuestion, Skill, mcp__jira__jira_get_issue, mcp__jira__jira_search, mcp__jira__jira_get_issue_images
 effort: high   # multi-stage delivery with an approval gate
 ---
@@ -13,8 +13,11 @@ Load the `ticket-delivery` skill first. It owns every rule: states and resume (�
 and the never-here table (§5), what each agent receives (§5), stop conditions (§7). This
 file is the order of steps. Where a step names a rule, follow the skill, do not restate it.
 
-**This command ends at `IMPLEMENTED`.** No validation, review or commit: that is
-`/implement-review`, after a human has read the code.
+**By default this command runs through to `REVIEWED`:** Analyse, Plan, Implement, then
+Validate and Review, with one automatic agent fix round if review or validation fails. Pass
+`--pause` to stop at `IMPLEMENTED` instead, so a human can read the code before it is judged;
+resume with `/implement-review`. **No commit here, and none in `/implement-review`** — the
+commit, push and PR are all `/create-pr`.
 
 You are the orchestrator. You have no `Edit` or `Write`. `Read` is for the sidecar and skill
 files, never source files. Agents read and write code and hand you conclusions. Write the
@@ -52,7 +55,8 @@ Short text plus a screenshot is the normal ticket here: the image is requirement
   analyst whose slice needs one pulls it.
 
 Scope comes from the ticket's words and images: Web → `fk-admin-panel-fe`, Backend/DB →
-`fk-admin-panel-be`, iOS/Android → `fk-mobile`. Unstated scope: ask.
+`fk-admin-panel-be`, iOS/Android → `fk-mobile`, E2E/Playwright tests → `automation-testing`.
+Unstated scope: ask.
 
 ## 2. Prepare
 
@@ -91,7 +95,7 @@ EOF
 Record the user's mode, base and branch answers in `## Locate` or the header. Later runs,
 the fix round and `/implement-review` read images only from `## Evidence`.
 
-## 3. Analyse → Plan → Approval → Implement
+## 3. Analyse → Plan → Approval → Implement → Validate → Review
 
 1. **Analyse.** One `ticket-analyst` per repo, all in one message. Give each what SKILL §5
    lists for Analyse, and nothing else. Append `## Analyse` with `ANALYSED`. A thin report
@@ -109,21 +113,47 @@ the fix round and `/implement-review` read images only from `## Evidence`.
    Give each what SKILL §5 lists for Implement, including `MISSING FROM THIS BASE`. Append
    `## Implement` with `IMPLEMENTED`, one block per repo: `CHANGED`, `DEVIATIONS`,
    `NOT DONE`, `NEEDS THE USER`.
+6. **Pause check.** If `--pause` was given, stop here at `IMPLEMENTED`: report per §4b and
+   point the user at `/implement-review`. Otherwise carry straight on.
+7. **Validate.** `ticket-freshness.sh check <KEY>` (exit 0 or 4 to go on; 3 or 5 stop), then
+   one `ticket-validator` per repo, all in one message, with what SKILL §5 lists for
+   Validate. Append `## Validate` with `VERIFIED`, `UNVERIFIED` or `FAILED_VERIFICATION`.
+   `FAILED_VERIFICATION` → the fix round (§3a). `UNVERIFIED` carries on to Review.
+8. **Review.** One `change-reviewer`, mode `gate`, after every repo validated — the dispatch
+   and verbatim instruction are `/implement-review` §3 (paths only; round `<n>`). On return:
+   - `VERDICT: PASS` → append `## Review` with `REVIEWED`. Done: go to §4a.
+   - `VERDICT: FAIL` → append `## Review` with `REVIEW_FAILED` → the fix round (§3a).
+   - `VERDICT: STALE BASE` → `sidecar state <KEY> BLOCKED "base moved during review"`, stop.
 
 ### 3a. The fix round
 
-Entered from `REVIEW_FAILED` or `FAILED_VERIFICATION` (SKILL §3). Read the last
-`## Review` or `## Validate` from `sidecar show <KEY> --last Validate Review`. Dispatch
-`ticket-implementer` only for the repos a finding names, giving it the finding text verbatim
-and its tree path. Append `## Implement` with `IMPLEMENTED` and send the user to
-`/implement-review`.
+Entered automatically from `FAILED_VERIFICATION` or a Review `FAIL` during the run-through
+(or on re-run from those states). Read the last `## Review` or `## Validate` from
+`sidecar show <KEY> --last Validate Review`. Dispatch `ticket-implementer` only for the repos
+a finding names, giving it the finding text verbatim and its tree path. Append `## Implement`
+with `IMPLEMENTED`, then **re-run Validate (step 7) and Review (step 8) once**.
 
-One fix round per approved plan (SKILL §2). If the hook refuses the append, record the
-standing finding with `sidecar state <KEY> BLOCKED "<finding>"` and hand it to the user.
+One fix round per approved plan (SKILL §2). If the hook refuses the append — a second fix —
+stop: record the standing finding with `sidecar state <KEY> BLOCKED "<finding>"` and hand the
+user the two routes (fix by hand then `/implement-review`, or the plan's one fix round is
+spent and the finding stands).
 
-## 4. Stop at IMPLEMENTED and hand over
+## 4. Hand over
 
-Do not run checks, review or commit. Your report, in this order:
+### 4a. Run-through: stop at REVIEWED
+
+Reached on a Review `PASS`. Do not commit. Your report, in this order:
+
+1. what changed per repo, with mode, tree path and branch;
+2. the checks that ran with their results, and what did not run and why (say `UNVERIFIED`
+   plainly when it applies); the review verdict and report path;
+3. what a human must still verify by hand;
+4. next: `/create-pr <KEY>` — it commits, then opens the PR behind its gate;
+5. the push line from SKILL §8.
+
+### 4b. Paused: stop at IMPLEMENTED
+
+Reached only with `--pause`. Do not run checks, review or commit. Report:
 
 1. what changed per repo, with mode, tree path and branch;
 2. how to read it: `git -C <tree> diff <base-ref>...HEAD`. In-place, say plainly: *"this is
@@ -132,4 +162,4 @@ Do not run checks, review or commit. Your report, in this order:
 4. the push line from SKILL §8.
 
 Anything blocked goes in the report and in `blocked:`. Reference `.work/<KEY>/work.md`
-rather than reproducing it. Never call the change validated, reviewed or done.
+rather than reproducing it. Never call the change committed or done.

@@ -5,14 +5,14 @@
       "id": 0,
       "name": "review-failed-after-hand-fix",
       "prompt": "The user types: \"/implement-review FKC-41 \u2014 I fixed the reviewer's findings by hand, carry on.\"\n\nThe sidecar .work/FKC-41/work.md reads:\n```\n# Work \u2014 FKC-41\nticket:   FKC-41 \u2014 Add export button to subcontract orders\njira:     updated=2026-09-28T09:12:44.000+0800 status=In Progress\nstate:    REVIEW_FAILED\nblocked:  -\nrepos:    fk-admin-panel-fe@feat/FKC-278-subcontract-export from staging@b33bcade (worktree)\ngraph:    fk-admin-panel-fe=worktree-update@b33bcade\n## Plan \u2014 2026-09-28   (export button on SubcontractOrders grid, CSV named subcontract-orders-<date>.csv)\n## Approval \u2014 2026-09-28  \"approved, go\"\n## Implement \u2014 2026-09-28  CHANGED src/pages/SubcontractOrders/index.jsx\n## Validate \u2014 2026-09-28  yarn lint exit 0; yarn build exit 0; verdict VERIFIED\n## Review \u2014 2026-09-28  VERDICT FAIL; AC3 FAIL: export filename has no date; report .work/FKC-41/review/1.md\n## Log\n```\nTool results you would get:\n- Jira re-read of FKC-41: updated=2026-09-28T09:12:44.000+0800, status In Progress, no new comments.\n- `.claude/hooks/ticket-freshness.sh check FKC-41` \u2192 exit 0, FRESH.",
-      "expected_output": "Continue with /implement-review: Jira and git unchanged, so re-validate, then re-review (round 2) with change-reviewer in gate mode given paths only; no implementer; commit only on PASS, by explicit path, one-line message, no push.",
+      "expected_output": "Continue with /implement-review: Jira and git unchanged, so re-validate, then re-review (round 2) with change-reviewer in gate mode given paths only; no implementer; on PASS append REVIEWED and point at /create-pr — nothing is committed in /implement-review.",
       "files": [],
       "assertions": [
         "Runs validation again (ticket-validator) before the second review, rather than going straight to review",
         "Dispatches change-reviewer in mode gate, round 2, passing paths/keys only rather than diffs or file contents",
         "Does not dispatch an implementer or edit any source file itself",
         "Does not read source files or the diff in the main thread",
-        "On PASS, commits by explicit path with a one-line conventional message and does not push or open a PR"
+        "On PASS, records REVIEWED and points the user at /create-pr; never commits, pushes or opens a PR in /implement-review"
       ]
     },
     {

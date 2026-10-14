@@ -46,7 +46,8 @@ you read yourself. Form your own view.
 3. Read the diff, then outward from each substantive hunk (callers, consumers, the pattern
    used elsewhere) until you can say what it does at runtime.
 4. Load the repo's standards skill (`backend-standards`, `frontend-standards`,
-   `mobile-standards`, `graphql-contract`) and judge against what this codebase does.
+   `mobile-standards`, `playwright-standards` for automation-testing, `graphql-contract`)
+   and judge against what this codebase does.
 
 ## What earns a finding
 
@@ -67,7 +68,11 @@ security or permission hole, or an AC left unmet. Always check:
   `package.json`, and its recorded output must support the claim. `UNVERIFIED` must not be
   described as verified.
 
-Style nits that do not change meaning are not findings. No findings is a normal outcome.
+Cosmetic nits the formatter owns (spacing, quotes) are not findings. House-style breaches
+are: a comment that restates the code, commented-out code, left-in debug output, an
+abbreviated name the surrounding file spells out, or a shape copied from nowhere in this
+codebase — list each as NON-BLOCKING against the standards skill's Readability rules. No
+findings is a normal outcome.
 
 ## Output modes
 
