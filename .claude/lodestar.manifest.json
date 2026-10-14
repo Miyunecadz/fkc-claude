@@ -138,6 +138,49 @@
         },
         "lastMappedBy": "graph.sh ensure"
       }
+    },
+    {
+      "name": "automation-testing",
+      "path": "./automation-testing",
+      "stacks": [
+        "has-eslint",
+        "has-prettier"
+      ],
+      "architecture": "graphify",
+      "docs": "docs/automation-testing/",
+      "catalogGaps": {
+        "unmatchedStacks": [
+          "playwright-e2e",
+          "typescript"
+        ],
+        "note": "Playwright E2E TypeScript suite; no catalog stack tag covers it. has-eslint/has-prettier matched no skill. Repo ships its own local playwright-standards skill.",
+        "doc": "docs/EXTENDING.md"
+      },
+      "mapping": {
+        "lastMappedSha": "3bdd3723a03822b0355608538b7971f56199c3f9",
+        "lastMappedAt": "2026-10-14T00:00:00Z",
+        "build": "full",
+        "extractFlags": [
+          "--force",
+          "--code-only"
+        ],
+        "graph": {
+          "nodes": 405,
+          "edges": 787,
+          "communities": 18,
+          "communityLabels": "placeholders (no LLM backend configured)"
+        },
+        "coverage": {
+          "filesTotal": 55,
+          "filesCovered": 45,
+          "filesMissing": 10,
+          "filesSkipped": 12333,
+          "filesStale": 3,
+          "mode": "graphify",
+          "note": "Of the 10 'missing': 2 are .claude/hooks/*.py that ARE in the graph under dot-stripped ids (the id-dot-strip artifact seen in fk-admin-panel-fe/fk-mobile; confirmed by the 3 stale entries claude/hooks/*.py and prettierrc.json). The other 8 are non-source JSON (.claude/settings.json, .prettierrc.json, 5 auth/*.json storageState fixtures, test-results/.last-run.json) which yield zero nodes. No real TypeScript source is absent."
+        },
+        "lastMappedBy": "graphify extract (lodestar-onboard)"
+      }
     }
   ],
   "skills": [
@@ -147,6 +190,7 @@
     "graphql-contract",
     "mobile-standards",
     "planning-workflow",
+    "playwright-standards",
     "pull-request"
   ],
   "guardrails": [
@@ -169,6 +213,22 @@
     "ticket-implementer",
     "ticket-validator"
   ],
+  "freshness": {
+    "mechanism": "bespoke-prompt-time",
+    "note": "Separate sub-repo layout; maps live in gitignored <repo>/graphify-out/, not docs/<repo>/architecture/, so nothing is committed. The template git-hook lockstep, union merge driver and committed-map drift check do not apply. Freshness is a UserPromptSubmit hook (.claude/hooks/graph-freshen.sh, wired in settings.json) that rebuilds any stale map in the background on a code-task prompt, plus graph.sh query self-heal. graph.sh refresh iterates REPOS, so every repo listed there is covered automatically.",
+    "hookManager": "none (prompt-time, not pre-commit)",
+    "graphifyLockstep": [],
+    "driftCheck": [],
+    "mergeDriver": false,
+    "covers": [
+      "fk-admin-panel-be",
+      "fk-admin-panel-fe",
+      "fk-mobile",
+      "automation-testing"
+    ],
+    "promptHook": ".claude/hooks/graph-freshen.sh",
+    "refreshCommand": ".claude/hooks/graph.sh refresh [--background]"
+  },
   "guardrailSurfaces": {
     "permission": {
       "rules": [

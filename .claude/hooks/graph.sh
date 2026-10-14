@@ -49,7 +49,7 @@ HOOKS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HOOKS/../.." && pwd)"
 WORK="$ROOT/.work"
 MANIFEST="$ROOT/.claude/lodestar.manifest.json"
-REPOS="fk-admin-panel-be fk-admin-panel-fe fk-mobile"
+REPOS="fk-admin-panel-be fk-admin-panel-fe fk-mobile automation-testing"
 
 die() { echo "$1" >&2; exit 1; }
 need_cli() { command -v graphify >/dev/null || { echo "graphify CLI not installed — read the source instead; do not hand-write a graph." >&2; exit 2; }; }
