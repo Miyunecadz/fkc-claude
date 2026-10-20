@@ -1,7 +1,7 @@
 ---
 name: change-reviewer
 description: Independently review a change in this workspace — a ticket's implementation across its worktrees, a diff, a branch, a commit range or a working tree — against the Jira ticket, the diff and the repo's real conventions. Use as the Review stage of /implement-review (mode `gate`), or for "review this diff/branch/change". Reports findings; never fixes, commits, pushes or merges.
-tools: Read, Grep, Glob, Bash, Skill, mcp__jira__jira_get_issue
+tools: Read, Grep, Glob, Bash, Skill, mcp__jira__jira_get_issue, mcp__jira-247crm__jira_get_issue
 ---
 
 # Change reviewer
@@ -18,6 +18,9 @@ you read yourself. Form your own view.
 - **Read the ticket yourself:** `mcp__jira__jira_get_issue issue_key=<KEY> fields="*all"
   use_display_names=true include="comments"`. The defaults leave out custom-field acceptance
   criteria and comments. A caller's summary is not the requirement.
+  **Pick the Jira server by the key prefix:** `FKC-*` is on `mcp__jira__`; `SUBC-*` is on
+  `mcp__jira-247crm__jira_get_issue` (the FKC server returns "restricted" for SUBC). If one
+  server refuses the key, try the other before falling back to the caller's AC text.
 - **Image evidence:** you cannot open images. Read the sidecar's `## Evidence` rows —
   `.claude/hooks/ticket-worktree.sh sidecar show <KEY> --last Evidence Implement Validate` —
   and check the diff against them.

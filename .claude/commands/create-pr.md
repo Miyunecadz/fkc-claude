@@ -1,7 +1,7 @@
 ---
 description: Push a reviewed ticket branch and open its Bitbucket pull request — draft, into staging, with one approval gate before anything leaves the machine
 argument-hint: <FKC-123 | ticket key> [repo] [destination] · or --checkout <repo> [destination] for a change with no ticket
-allowed-tools: Task, Agent, SendMessage, ToolSearch, Bash, Read, AskUserQuestion, Skill, mcp__jira__jira_get_issue, mcp__jira__jira_add_comment, mcp__jira__jira_edit_comment, mcp__bitbucket__bb_get, mcp__bitbucket__bb_post, mcp__bitbucket__bb_put
+allowed-tools: Task, Agent, SendMessage, ToolSearch, Bash, Read, AskUserQuestion, Skill, mcp__jira__jira_get_issue, mcp__jira__jira_add_comment, mcp__jira__jira_edit_comment, mcp__jira-247crm__jira_get_issue, mcp__jira-247crm__jira_add_comment, mcp__jira-247crm__jira_edit_comment, mcp__bitbucket__bb_get, mcp__bitbucket__bb_post, mcp__bitbucket__bb_put
 effort: high   # an outward-facing action behind an approval gate
 ---
 
@@ -29,6 +29,9 @@ merge.
 You have no `Edit` and no `Write`. `pr-author` writes the draft; `pr-body.py` shapes it.
 
 `<pr-dir>` below is `.work/<KEY>/pr` for a ticket, or `.work/no-ticket/pr` for `--checkout`.
+**Pass it to `pr-author` as an absolute path** (e.g. `$(pwd)/.work/<KEY>/pr`). `pr-author`
+runs with its cwd set to the tree path; in-place that tree is a subdir of the workspace root,
+so a workspace-relative `.work/...` would resolve inside the repo and write the drafts there.
 
 ## 1. Resolve the change
 
@@ -38,6 +41,9 @@ You have no `Edit` and no `Write`. `pr-author` writes the draft; `pr-body.py` sh
 ```
 
 Read `.work/<KEY>/work.md` and the Jira issue once with `mcp__jira__jira_get_issue`.
+**Pick the Jira server by key prefix:** `FKC-*` is on `mcp__jira__`; `SUBC-*` is on
+`mcp__jira-247crm__` (the FKC server returns "restricted" for SUBC). Use the matching server
+for every Jira call in this run, including the §10 delivery comment.
 `state:` must be `REVIEWED` (the change is reviewed but **not yet committed** — this command
 commits it) or `HANDED_OVER` (already committed in an earlier `/create-pr` run — resume at the
 draft); earlier → say which stage is missing and stop. `PR_OPEN` → verify the existing PR, do
@@ -96,7 +102,9 @@ range it prints is non-empty.
 Dispatch one `pr-author` per repo, **all in one message**, and wait for all of them. Give
 each only: repo, the literal path, branch, destination, the diff range the preflight printed,
 the ticket key (or "none"), the Trello card URL from the sidecar's `ticket:` header (or
-"none"), and `<pr-dir>`. It writes `<pr-dir>/<repo>.title` and `<pr-dir>/<repo>.txt` and
+"none"), and `<pr-dir>` **as an absolute path** (§ top: `pr-author`'s cwd is the tree, so a
+relative `.work/...` writes inside the repo). It writes `<pr-dir>/<repo>.title` and
+`<pr-dir>/<repo>.txt` and
 returns the paths, the title and its flags.
 
 A `stop:` line, a secret flag or an out-of-scope change ends the run — report it.

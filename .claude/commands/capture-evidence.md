@@ -1,7 +1,7 @@
 ---
 description: Capture UI evidence that a delivered ticket works — drive the running app with Playwright, screenshot the ticket's screens, and save them to .work/<KEY>/shots/ for a human to upload to the pull request
 argument-hint: <FKC-123 | ticket key> (the app must be running at :3000 and :4000)
-allowed-tools: Bash, Read, AskUserQuestion, Skill, mcp__jira__jira_get_issue, mcp__plugin_playwright_playwright__browser_navigate, mcp__plugin_playwright_playwright__browser_snapshot, mcp__plugin_playwright_playwright__browser_type, mcp__plugin_playwright_playwright__browser_fill_form, mcp__plugin_playwright_playwright__browser_click, mcp__plugin_playwright_playwright__browser_press_key, mcp__plugin_playwright_playwright__browser_wait_for, mcp__plugin_playwright_playwright__browser_take_screenshot, mcp__plugin_playwright_playwright__browser_navigate_back, mcp__plugin_playwright_playwright__browser_handle_dialog, mcp__plugin_playwright_playwright__browser_close
+allowed-tools: Bash, Read, AskUserQuestion, Skill, mcp__jira__jira_get_issue, mcp__jira-247crm__jira_get_issue, mcp__plugin_playwright_playwright__browser_navigate, mcp__plugin_playwright_playwright__browser_snapshot, mcp__plugin_playwright_playwright__browser_type, mcp__plugin_playwright_playwright__browser_fill_form, mcp__plugin_playwright_playwright__browser_click, mcp__plugin_playwright_playwright__browser_press_key, mcp__plugin_playwright_playwright__browser_wait_for, mcp__plugin_playwright_playwright__browser_take_screenshot, mcp__plugin_playwright_playwright__browser_navigate_back, mcp__plugin_playwright_playwright__browser_handle_dialog, mcp__plugin_playwright_playwright__browser_close
 effort: medium
 ---
 
@@ -25,6 +25,7 @@ It never edits source, never commits, never pushes, never touches Jira. Screens 
 No argument: relay the list, ask which ticket, stop.
 
 Read the Jira issue once with `mcp__jira__jira_get_issue` (`fields="*all"`, `include="comments"`).
+**Pick the Jira server by key prefix:** `FKC-*` on `mcp__jira__`, `SUBC-*` on `mcp__jira-247crm__`.
 The **goal and acceptance criteria** say what "working" looks like; the sidecar's `## Evidence`
 image rows say what the screens should show.
 

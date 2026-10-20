@@ -1,7 +1,7 @@
 ---
 description: Drive a Jira ticket (FKC) through analysis, planning, implementation, validation and review — in an isolated git worktree per repo, running through to REVIEWED, or stopping at IMPLEMENTED with --pause for a human read, before anything is committed
 argument-hint: <FKC-123 | ticket key or summary substring> [--pause] [--in-place] (omit to list ticket workspaces in flight)
-allowed-tools: Task, Agent, SendMessage, Bash, Read, AskUserQuestion, Skill, mcp__jira__jira_get_issue, mcp__jira__jira_search, mcp__jira__jira_get_issue_images
+allowed-tools: Task, Agent, SendMessage, Bash, Read, AskUserQuestion, Skill, mcp__jira__jira_get_issue, mcp__jira__jira_search, mcp__jira__jira_get_issue_images, mcp__jira-247crm__jira_get_issue, mcp__jira-247crm__jira_search, mcp__jira-247crm__jira_get_issue_images
 effort: high   # multi-stage delivery with an approval gate
 ---
 
@@ -35,6 +35,10 @@ Resolve the argument to one key: a bare key goes to `mcp__jira__jira_get_issue`;
 else to `mcp__jira__jira_search` first (several matches: ask; none: stop). Read the issue
 **once, in full**, with the call in FRESHNESS §1 (`fields="*all"`, `include="comments"`).
 The defaults leave out custom-field acceptance criteria, attachments and comments.
+
+**Pick the Jira server by key prefix:** `FKC-*` is on `mcp__jira__`; `SUBC-*` is on
+`mcp__jira-247crm__` (the FKC server returns "restricted" for SUBC) — use the matching server
+for every Jira call here, including `jira_get_issue_images` and the freshness re-read.
 
 Stop, reporting what exists, if the ticket was delivered already (FRESHNESS §1: delivery
 comment, branch by key or Trello number, status at or past `In Code Review`).
