@@ -27,6 +27,33 @@ and you fix the doc in the same change.
 - **Checks:** `yarn lint` (`.eslintrc.js`), `yarn build`. Prettier config in
   `.prettierrc.js`. Tests are thin: one unit test plus Playwright `browser.test.ts`.
 
+**Code craft (the lines you write)**
+
+- Shape the control flow of code you write or change; spacing, quotes and naming still
+  match the file. Applies to your new lines and to junior code in a block you are
+  already editing; never a shared helper or an untouched file (report those).
+- `const` by default; `let` only when you reassign. A simple either/or is a ternary,
+  not `let` + `if`/`else`. Never nest ternaries.
+- Return early for loading, error and empty states before the main JSX; no deep ternary
+  tree inside the returned markup. No `else` after a branch that returns.
+- Derive, don't mirror: compute a value from props or state during render instead of
+  copying it into another `useState` + `useEffect`.
+- Destructure props and hook results at the top. Keys come from ids, never the array index.
+- `useMemo`/`useCallback` only for a real referential-stability need, not by reflex.
+
+**Best practices (new code)**
+
+- Same scope as Code craft above: your new or changed lines only.
+- One component, one job. Split a component that grows past ~150 lines or handles two
+  unrelated concerns; keep a small, focused one whole.
+- Lift state only as high as it is shared; colocate it with the component that uses it.
+- Guard query data before you read it: `data?.thing ?? fallback`, and render the loading
+  and error states first (as in Code craft).
+- Event handlers are named `handleX`. In a list row, don't pass a freshly built function
+  or object prop each render if it drives re-renders — hoist it or memoise it.
+- Inputs have labels; a clickable thing is a `<button>`, not a `<div>` with `onClick`.
+- `===` and `!==` only. Destructure the props and hook results you use at the top.
+
 **Readability and house style**
 
 - Match the nearest similar file: its naming, casing, import style, file shape and

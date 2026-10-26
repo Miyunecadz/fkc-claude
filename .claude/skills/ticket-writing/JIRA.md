@@ -1,20 +1,17 @@
 # Jira mechanics — the project server only
 
 This file owns the call order, the JQL, how text survives the trip into Jira, and the
-create, attach and update mechanics. Every call uses the `jira` MCP server
-(`mcp__jira__*`) and nothing else (SKILL.md §1).
+create, attach and update mechanics. Every call uses the resolved board's server
+(`BOARDS.md` §1) and no other (SKILL.md §1).
 
-## 1. Resolve the target project — from config, not memory
+## 1. Resolve the target board — BOARDS.md
 
-1. Read `.mcp.json` at the workspace root and take the value after `--jira-projects-filter`
-   (today `FKC`). The file is the source of truth; it can change without this skill.
-2. Confirm it resolves: `mcp__jira__jira_search_projects { query: "<key>" }`, or
-   `mcp__jira__jira_get_all_projects` when that returns nothing useful.
-3. Several comma-separated keys → ask the requester which one, offering the keys.
-4. Empty or missing filter → the server is not project-scoped. Ask for the key; never
-   default to the first project that appears.
-
-`project_key` must match `^[A-Z][A-Z0-9_]+$`.
+[`BOARDS.md`](BOARDS.md) §1 resolves the board, its server namespace and its profile from
+`.mcp.json` and the request. Every `mcp__jira__…` call written below is shorthand for the
+resolved server's namespace — `mcp__jira-247crm__…` for SUBC — and `<KEY>` / `project_key`
+is that board's key. Confirm the key resolves on that server:
+`mcp__jira__jira_search_projects { query: "<key>" }`, or `…jira_get_all_projects` when that
+returns nothing useful.
 
 ## 2. Duplicate search
 
@@ -31,8 +28,11 @@ mcp__jira__jira_search { jql: "project = <KEY> AND statusCategory != Done AND te
 
 ## 3. Writing text that survives Jira
 
-`FKC` is on Jira Cloud. The server turns the Markdown `description` into Jira's own
-document format (ADF). Checked against the server's converter:
+Both boards are on Jira Cloud, so the server turns the Markdown `description` into Jira's
+own document format (ADF). The table below is checked against the **FKC** converter; the
+**SUBC (247crm)** converter is stricter — it parses `[...]` as a link inside code spans and
+fenced blocks too, and mangles a leading `# ` in inline code. Follow `BOARDS.md` §3 for that
+site: keep `[` out of code, write list types in words, and verify the read-back.
 
 | You write | Jira shows |
 |---|---|
@@ -56,8 +56,10 @@ document format (ADF). Checked against the server's converter:
 
 Project facts — still check at runtime:
 
-- `FKC` is a team-managed Jira Cloud project. `Module` is its epic-level container: link
-  with `{"parent": "FKC-<n>"}`, not `epicKey`, and only when the requester named the module.
+- **FKC only:** it is a team-managed Jira Cloud project whose `Module` is the epic-level
+  container — link with `{"parent": "FKC-<n>"}`, not `epicKey`, and only when the requester
+  named the module. Other boards: discover their own types and fields the same way below;
+  assume none of FKC's conventions.
 - `jira_search` and `jira_get_issue` return `browse_url` per issue. That is the link to
   report; never build one by hand.
 
@@ -103,7 +105,12 @@ uploaded appears in `attachment`.
 
 ## 5. Attach the screenshots
 
-Only for screenshots that arrived as file paths (SKILL.md §4). One call, all files:
+Only for screenshots that arrived as file paths (SKILL.md §4).
+
+**The board decides how.** A board whose MCP server has no upload tool — SUBC today — cannot
+use the call below; attach through the REST fallback in `BOARDS.md` §3 instead, then confirm
+in the read-back. The MCP call, one call for all files, is for boards whose server accepts
+`attachments` (FKC):
 
 ```
 mcp__jira__jira_update_issue {

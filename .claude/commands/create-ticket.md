@@ -1,5 +1,5 @@
 ---
-description: Turn a rough Product Owner request (text and/or screenshots) into a refined build-brief ticket raised in this workspace's Jira project (FKC)
+description: Turn a rough Product Owner request (text and/or screenshots) into a refined build-brief ticket raised on the right board in this workspace's Jira (FKC or SUBC)
 argument-hint: <Product Owner request> [screenshot paths]
 allowed-tools: Agent, Task, SendMessage, Read, AskUserQuestion
 effort: low   # orchestration only: prepare the input, delegate, relay the report

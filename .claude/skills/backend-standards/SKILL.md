@@ -178,6 +178,39 @@ thing the rule covers.
 - Do not change `executeSqlQuery`, `filterSqlBuilder`, `shield.js` options or
   `src/utils/queue.js` unless the task asks. Report problems you see in them instead.
 
+**Code craft (the lines you write)**
+- These shape the control flow of code you write or change. Not spacing or quotes —
+  those still match the file (section 3). They apply to your new lines, and to junior
+  code inside a block you are already editing for the task; never to a shared legacy
+  helper or an untouched file (put those in the report).
+- `const` by default. Use `let` only for a variable you actually reassign. A `let`
+  written once is a `const`.
+- A simple either/or assignment is a ternary, not `let` + `if`/`else`:
+  `const t = useSmtp() ? a() : b();`. Never nest ternaries — a second `?` means
+  `if`/`else` or a lookup object.
+- Return early. Handle the missing, invalid or not-found case at the top and return or
+  throw, so the happy path stays unindented. No `else` after a branch that returns or
+  throws.
+- No redundant boolean: `return count > 0`, not `if (count > 0) return true; return false`.
+- One clear name beats a comment. Drop an intermediate variable used once that adds no
+  meaning; keep one that names a non-obvious expression.
+- Reach for `?.`, `??` and `map`/`filter`/`find` where they state intent more plainly
+  than a manual check or index loop. Keep a plain loop when it does real work per item.
+
+**Best practices (new code)**
+- Same scope as Code craft above: your new or changed lines, not a rewrite of the file.
+- One function, one job. Lift a nameable sub-task of ~15+ lines, or one you repeat, into
+  a named helper in the same file. Don't split a short, linear block for its own sake.
+- Name every repeated literal — a status string, a page size, a timeout — as a `const`
+  at the top of the module, as `SORT_COLUMNS` does. No magic numbers in logic.
+- Keep logic pure and I/O at the edges: compute, then write; never fetch inside a plain
+  `map` used only to shape rows.
+- Don't mutate arguments or shared objects. Build a new object (`{ ...row }`) as the model
+  files do.
+- `===` and `!==` only. Destructure the fields you use from `args` and `context`.
+- Never leave a floating promise. `await` it, return it, or handle it; a fire-and-forget
+  write is a dropped error.
+
 **Readability and house style**
 - Match the nearest similar file: its naming, casing, import style, file shape and
   comment density. Copy the pattern; do not invent one.

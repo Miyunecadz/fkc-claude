@@ -15,6 +15,10 @@ Only one of these:
 
 Never choose to extend on your own. An overlap is reported; the requester decides.
 
+**The issue key picks the board.** `FKC-<n>` → `mcp__jira__`, `SUBC-<n>` → `mcp__jira-247crm__`
+(`BOARDS.md` §1). Every `mcp__jira__…` call below means that server, and attachments follow
+that board's method (`BOARDS.md` §3 — SUBC has no MCP upload tool).
+
 ## 2. Read the issue first — it decides whether you may edit
 
 ```
@@ -48,9 +52,10 @@ The existing description stays. Other people wrote it, and people may be buildin
   wrong. Same rules as SKILL.md §7.
 - The same gate applies: no placeholder, no open material gap, no design outside the two
   technical sections.
-- Fixed sections (`Affected System(s)`, `Other Info`, `Resolution`): tick a new system only
-  on evidence. Do not change `SEVERITY`, `TIME ESTIMATE` or the MERGED boxes unless the
-  requester stated a new value.
+- Fixed sections (FKC only — `Affected System(s)`, `Other Info`, `Resolution`): tick a new
+  system only on evidence. Do not change `SEVERITY`, `TIME ESTIMATE` or the MERGED boxes
+  unless the requester stated a new value. Another board: respect whatever shape the issue
+  already has (§3 first bullet).
 
 ## 4. Gate B — confirm the change, not the whole issue
 

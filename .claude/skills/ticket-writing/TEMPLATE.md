@@ -11,9 +11,13 @@ it and pass it as `description` to `mcp__jira__jira_create_issue` (`JIRA.md` §4
 - A `Bug` uses the same sections, with the bug lines below inside them — not new headings.
 - Write for Jira's converter (`JIRA.md` §3): no HTML, other-site keys as explicit links.
 
-The first seven sections are the build brief. A developer or an agent builds from them
-without the conversation. Anything they would have to guess is a gap in the ticket. The
-last four are the team's fixed sections.
+The first seven sections are the build brief and apply to **every board** — a developer or
+an agent builds from them without the conversation, so anything they would have to guess is
+a gap. Two caveats per board (`BOARDS.md` §2): a board with no local code in this workspace
+(SUBC today) **omits** `Files/areas to touch` and `Existing patterns to follow`, since there
+is nothing to read. The last four sections are the **FKC board profile's** fixed sections —
+another board appends its own fixed sections, or none. Resolve the board first, then emit
+only the sections its profile carries.
 
 ---
 

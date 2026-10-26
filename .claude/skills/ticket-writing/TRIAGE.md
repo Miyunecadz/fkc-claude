@@ -42,6 +42,11 @@ step 2), asked before any code is read.
 
 ## 2. Existence verdict
 
+**Boards with no local code in this workspace skip this section** (`BOARDS.md` §2 — SUBC
+today): there is nothing to read, so the ticket is built from the PO input and screenshots,
+and `Files/areas to touch` / `Existing patterns to follow` are omitted. The rest of this
+section is for a board whose code lives here (FKC).
+
 A targeted read at the branch the request is about (`git -C <repo> show <branch>:<path>`,
 or `grep` on the directory the request touches). Stop as soon as one verdict holds:
 
@@ -69,7 +74,9 @@ read to find one.
 
 ## 3. Tier — set by triggers, not by feel
 
-Any one trigger is enough. Take the highest tier that matches.
+Any one trigger is enough. Take the highest tier that matches. The triggers that name a
+repo, file or stack are **FKC-specific**; a board with no local code (`BOARDS.md` §2) uses
+only the ones that do not — business rule, money arithmetic, data meaning, safety, agreement.
 
 | Trigger | Minimum tier |
 |---|---|

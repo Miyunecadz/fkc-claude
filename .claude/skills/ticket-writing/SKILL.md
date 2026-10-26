@@ -1,6 +1,6 @@
 ---
 name: ticket-writing
-description: Turn raw Product Owner input — text, chat, screenshots — into a build-brief ticket (goal, numbered acceptance criteria, decisions already made, out of scope, files to touch, a real pattern to follow) and raise it in Jira through the project `jira` MCP server, with the screenshots attached. Also extends an existing FKC issue with new or changed requirements. Use whenever asked to write, draft, raise, log or create a ticket, issue, bug or task, or to add to, amend or extend an existing ticket, especially with screenshots or a vague request. Never implements; never saves a local file.
+description: Turn raw Product Owner input — text, chat, screenshots — into a build-brief ticket (goal, numbered acceptance criteria, decisions already made, out of scope, files to touch, a real pattern to follow) and raise it in Jira through the workspace's board server (FKC or SUBC — `BOARDS.md` resolves which), with the screenshots attached. Also extends an existing issue with new or changed requirements. Use whenever asked to write, draft, raise, log or create a ticket, issue, bug or task, or to add to, amend or extend an existing ticket, especially with screenshots or a vague request. Never implements; never saves a local file.
 ---
 
 # Ticket writing (Jira)
@@ -30,24 +30,29 @@ They own their subject outright. This skill does not restate or contradict them.
 Each costs 2.5–3.3k tokens that are re-served on every later call, so load one only when it
 has work to do.
 
-## 1. The Jira server, local files — the one owner of this rule
+## 1. The Jira servers, local files — the one owner of this rule
 
-The only Jira surface is the MCP server in this workspace's [`.mcp.json`](../../../.mcp.json):
-server `jira`, tools `mcp__jira__*`, already scoped by `--jira-projects-filter`.
+The Jira surface is the `mcp-atlassian` servers in this workspace's
+[`.mcp.json`](../../../.mcp.json) — `jira` (FKC) and `jira-247crm` (SUBC) today, each scoped
+by its own `--jira-projects-filter`. [`BOARDS.md`](BOARDS.md) resolves which board a request
+targets; every call goes to that board's server and no other.
 
 Forbidden, even when connected and even when it looks the same:
 
-- any other Atlassian/Jira MCP server from user-level config or a plugin — e.g.
-  `mcp__MCP_DOCKER__*`, `mcp__atlassian__*`, `mcp__jira-247crm__*`, an `atlassian` skill;
-- `curl`, `uvx`, `acli` or any REST call to Jira;
+- any Atlassian/Jira MCP server **not in this workspace's `.mcp.json`** — a user-level or
+  plugin server such as `mcp__MCP_DOCKER__*`, `mcp__atlassian__*`, or an `atlassian` skill;
+- `uvx`, `acli` or a REST call to Jira — one sanctioned exception: the 247crm attachment
+  fallback in `BOARDS.md` §3, because that site's MCP server has no upload tool;
 - **saving the ticket to disk** — no `tickets/*.md`, sidecar or draft file, not even when
   asked to "save it too". The Jira issue is the ticket. Offer the key, the link, or the
   body pasted in chat.
 
-If no `mcp__jira__*` tool is available, **stop and say the project Jira MCP server is not
-connected**. That is the whole report. No other server, no file instead.
+If the resolved board's `mcp__…__*` tools are not available, **stop and say that board's
+Jira MCP server is not connected**. If no board resolves at all — no `.mcp.json`, or it holds
+no `mcp-atlassian` server — **stop and say no Jira board is configured** (`BOARDS.md` §1 step
+6). Either way that is the whole report. No other server, no file instead.
 
-Project key and every call: [`JIRA.md`](JIRA.md).
+Which board, which server, which profile: [`BOARDS.md`](BOARDS.md). Every call: [`JIRA.md`](JIRA.md).
 
 ## 2. Triage
 
@@ -78,8 +83,9 @@ on it, and it stays out.
 
 ## 4. Screenshots — attach what has a file
 
-The server attaches files to an issue through `jira_update_issue`'s `attachments` input
-(`JIRA.md` §5). It can only upload a file that exists on this machine, so:
+The board attaches files by its own method — FKC through `jira_update_issue`'s
+`attachments` input, SUBC through the REST fallback (`JIRA.md` §5, `BOARDS.md` §3). Either
+way it can only upload a file that exists on this machine, so:
 
 - **A screenshot with a file path** — attach it to the issue straight after creating it.
 - **A screenshot pasted inline** that arrived only as a caller's written inventory — there
@@ -106,6 +112,11 @@ the same whichever way the file arrives. Say a file is attached only when the re
 
 The gate is the evidence skill's (§6–§9 there): `BLOCKED` means no issue at all. Local rules:
 
+- **The gate blocks only on a material requirement gap** — an undefined rule, value, label or
+  scope the builder would otherwise guess. It does **not** block on which board, which server,
+  or how to place code: the board is settled in `BOARDS.md` §1, and raising on the resolved
+  board is always a valid forward action. A board or workflow tangle is never a reason to
+  refuse; if every option you are about to offer is blocked, re-resolve the board and proceed.
 - The placeholder ban covers the whole description. A created issue sits in a shared
   backlog, and someone will build from whatever it says.
 - A gap you noticed but did not ask about is not covered by `If something isn't covered
@@ -139,7 +150,10 @@ that will be attached, and ask once:
 
 Corrections are `EXPLICIT` evidence: fold them in and ask again. Nothing is created until
 the answer is yes. No question tool (a subagent) → hand the draft and this question to the
-caller, and create only when resumed with a yes.
+caller, and create only when resumed with a yes. **A relayed answer is consent:** a "yes"
+that arrives through `AskUserQuestion` or a `SendMessage` relay is the requester's own word,
+exactly as if typed here. Never read a relay as non-consent, and never re-ask gate B because
+of a board or workflow tangle — only a new correction reopens it.
 
 Then create per `JIRA.md` §4 — one issue — attach the screenshot files per `JIRA.md` §5,
 and read it back. Do not transition, assign, comment on or add watchers to it; it stays in
@@ -157,18 +171,24 @@ Local:
 
 - **No duplicate**: searched with more than one phrasing (`TRIAGE.md` §1).
 - **Environment**: named where it matters; current behaviour read at *that* branch.
-- **Template**: every `TEMPLATE.md` section in order, headings and fixed lines verbatim, no
-  section added, no `[bracket]` left, `Read at:` line filled; tier content per `TRIAGE.md` §3.
+- **Board**: resolved from `.mcp.json` and the request (`BOARDS.md` §1); the ticket carries
+  only the sections that board's profile keeps (`BOARDS.md` §2).
+- **Template**: every section the profile carries, in order, headings and fixed lines
+  verbatim, no section added, no `[bracket]` left; `Read at:` filled where the technical
+  sections apply; tier content per `TRIAGE.md` §3.
 - **Criteria**: numbered; each can fail by hand; edge cases on their own lines.
 - **Decisions**: each a value or rule, not a topic; every gate answer present.
 - **Out of scope**: not empty; every `SCOPE-OUT` row; the obvious neighbours named.
-- **Paths**: every path in the two technical sections was opened at the named branch.
+- **Paths**: on a board with local code, every path in the two technical sections was opened
+  at the named branch; a no-code board omits those sections (`BOARDS.md` §2).
 - **Language**: no design detail outside the two technical sections, none prescribed in them.
-- **Fixed sections**: ticks, `SEVERITY` and `TIME ESTIMATE` per `TEMPLATE.md` evidence rules.
+- **Fixed sections**: on FKC, ticks, `SEVERITY` and `TIME ESTIMATE` per `TEMPLATE.md`
+  evidence rules; another board, only its own profile's fixed sections.
 - **Summary**: 255 characters at most; no key, no full stop.
 - **Bug**: a `Bug` has actual, expected, where seen and steps (`TEMPLATE.md`).
-- **Jira text**: `JIRA.md` §3 — other-site keys as explicit links, no HTML, no comments.
-- **Jira fields**: key from `.mcp.json`; type exists; every field and value allowed.
+- **Jira text**: `JIRA.md` §3 and the board's `BOARDS.md` §3 quirks — other-site keys as
+  explicit links, no HTML, no comments.
+- **Jira fields**: key from `.mcp.json`; type exists on that board; every field and value allowed.
 - **Confirmed**: gate B answered yes (§8).
 
 ## 10. Report
